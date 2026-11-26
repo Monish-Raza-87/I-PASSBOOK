@@ -19,7 +19,7 @@
 // the "update available" notice. That comparison is only meaningful because the
 // two numbers are pinned together — which is why the pin is load-bearing and not
 // just a tidy convention.
-const APP_VERSION = 'v156';
+const APP_VERSION = 'v157';
 
 // Fill every version slot on the page. One writer, so there is one place to look
 // when the number is wrong — the slots themselves are static markup, present on
@@ -579,6 +579,25 @@ function deviceLabel() {
   return os + ' · ' + br + installed;
 }
 
+// True only for the INSTALLED, HAND-SIZED app — the one the owner calls "mobile
+// application … secure in one's hand". A desktop tab, a desktop installed PWA, and
+// a phone's normal browser all return false, so they keep the browser rules.
+// Used for two things the owner asked for by name: the persistent session (no
+// auto-logout in the app) and the Google door's new-tab handoff.
+function isInstalledMobileApp() {
+  try {
+    const mm = window.matchMedia;
+    const installed =
+      !!(mm && (mm('(display-mode: standalone)').matches || mm('(display-mode: fullscreen)').matches)) ||
+      window.navigator.standalone === true;
+    if (!installed) return false;
+    const coarse = !!(mm && mm('(pointer: coarse)').matches);
+    const screen = window.screen || {};
+    const small = Math.min(screen.width || 9999, screen.height || 9999) <= 820;
+    return coarse || small;
+  } catch (e) { return false; }
+}
+
 function loginBackend(email, password, code, resend) {
   // The password may legitimately be EMPTY — that is the passwordless door, where
   // stage 1 (no code) asks for a code and stage 2 (code) redeems it. Only the
@@ -727,7 +746,12 @@ const CREDENTIAL_SPENDING_ACTIONS = {
 function postAuth(action, fields) {
   const fd = new FormData();
   fd.append('action', action);
-  Object.keys(fields).forEach(k => fd.append(k, fields[k]));
+  // The installed app is the one class of client whose session must outlive the
+  // shift. Sent on every self-authenticating POST; doors that do not mint a session
+  // (forgot/reset) simply ignore it.
+  const all = Object.assign({}, fields);
+  if (isInstalledMobileApp()) all.persistent = 'true';
+  Object.keys(all).forEach(k => fd.append(k, all[k]));
   return postJson(_origFetch, fd, CREDENTIAL_SPENDING_ACTIONS[action] ? 0 : 1);
 }
 
@@ -855,6 +879,35 @@ function checkHandoff() {
 
 function isHandoffReturn() {
   return !!checkHandoff();
+}
+
+// ─── ADOPTING A SESSION FROM ANOTHER CONTEXT ─────────────────────────────────
+// The installed Android app hands Google to a Chrome tab (see submitGoogleSignIn),
+// and that tab performs the exchange and writes the session to the shared origin.
+// This window does not see that write, so when it regains focus it reloads once
+// into the new session. iOS standalone never reaches this: its storage is separate,
+// and the door refuses before leaving. The reload is boot's normal path, so the
+// session is validated and routed exactly like any other sign-in.
+let _adoptingSession = false;
+function adoptExternalSession() {
+  if (_adoptingSession || currentUser) return;
+  if (!hasStoredSession()) return;
+  const auth = document.getElementById('auth-container');
+  if (auth && auth.style.display === 'none') return;
+  _adoptingSession = true;
+  location.reload();
+}
+if (typeof window.addEventListener === 'function') {
+  window.addEventListener('storage', e => {
+    if (e.key === SESSION_KEY || e.key === USER_KEY) adoptExternalSession();
+  });
+  window.addEventListener('pageshow', e => { if (e.persisted) adoptExternalSession(); });
+  window.addEventListener('focus', adoptExternalSession);
+}
+if (typeof document.addEventListener === 'function') {
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') adoptExternalSession();
+  });
 }
 
 
@@ -1866,14 +1919,16 @@ window.addEventListener('load', () => {
     }
   }
 
-  // A device that is already signed in: no video, no download, no flash of the sign-in
-  // screen. A Google return takes the same road for the same reason — the sign-in has
-  // already started, and an intro standing in the middle of it is a delay between a
-  // person and a session they have already earned.
-  if (hasStoredSession()) { routeBoot(); return; }
-
+  // A Google return is checked FIRST. It used to come after the stored-session
+  // return, which meant a round trip that landed on a device holding an old token
+  // silently ignored the fresh code. A return is newer than any stored session, so
+  // it wins. Only past both does the load fall through to the sign-in screen.
   const handoff = checkHandoff();
   if (handoff) { finishHandoff(handoff); return; }
+
+  // A device that is already signed in: no video, no download, no flash of the
+  // sign-in screen.
+  if (hasStoredSession()) { routeBoot(); return; }
 
   // Past both returns, this load is ending on the SIGN-IN screen — the one outcome we
   // can be certain of, and the reason the wake-up is started here rather than inside
@@ -1926,6 +1981,34 @@ function applyOverviewOpen(open) {
     const nextOpen = panel ? panel.classList.contains('is-collapsed') : false;
     applyOverviewOpen(nextOpen);
     try { localStorage.setItem(OVERVIEW_OPEN_KEY, nextOpen ? '1' : '0'); } catch (e) { /* storage blocked */ }
+  });
+})();
+
+// ─── THE IR IDENTITY STRIP, AS A PHONE DRAWER ────────────────────────────────
+// The strip above the Overview is the ticket's paperwork: IR number, serial,
+// company, reporter, the workflow pills and the Allot CAPS / Comments / History /
+// Legacy actions. On a phone it used to take the top of the screen before the
+// section the person opened the ticket for. It now collapses to the IR number,
+// with one tap to bring it back; desktop never hides it and never renders the
+// control. The state is set per open (openPassbook), not remembered across tickets.
+function applyBannerCollapsed(collapsed) {
+  const banner = document.getElementById('ir-banner');
+  if (!banner) return;
+  const isCollapsed = !mqDesktop.matches && !!collapsed;
+  banner.classList.toggle('is-collapsed', isCollapsed);
+  const btn = document.getElementById('ir-banner-toggle');
+  if (!btn) return;
+  btn.setAttribute('aria-expanded', String(!isCollapsed));
+  const label = btn.querySelector('.ir-banner-toggle-text');
+  if (label) label.textContent = isCollapsed ? 'Show details' : 'Hide details';
+}
+(function initBannerToggle() {
+  const btn = document.getElementById('ir-banner-toggle');
+  if (!btn) return;
+  applyBannerCollapsed(!mqDesktop.matches);
+  btn.addEventListener('click', () => {
+    const banner = document.getElementById('ir-banner');
+    applyBannerCollapsed(!(banner && banner.classList.contains('is-collapsed')));
   });
 })();
 
@@ -2444,6 +2527,30 @@ function submitGoogleSignIn() {
   // This is a top-level navigation, so the wait screen index.html raises for a
   // `#sso=` return is the only screen the person sees until the exchange lands —
   // which is the shape he asked for.
+  //
+  // ⚠ THE INSTALLED APP IS THE ONE EXCEPTION. A same-tab navigation leaves the app:
+  // the return then runs in the browser and writes the session there (and on iOS
+  // in a storage container the home-screen app cannot see at all). Android shares
+  // Chrome's storage, so the app opens Google in a tab and adopts the session the
+  // tab writes; the browser and desktop keep the same-tab flow unchanged.
+  if (isInstalledMobileApp()) {
+    if (window.navigator.standalone === true) {
+      // iOS standalone: Safari and the home-screen app do not share localStorage, so
+      // there is no way to bring this session back. Say so instead of launching a
+      // round trip that cannot return.
+      if (btn) btn.disabled = false;
+      if (hint) { hint.textContent = ''; hint.style.display = 'none'; }
+      setAuthError('On iPhone, Google sign-in cannot return into the installed app. Sign in with your email and the code we send, or open I-PASSBOOK in Safari to use Google.');
+      return Promise.resolve();
+    }
+    try { window.open(googleStartUrl(), '_blank', 'noopener'); }
+    catch (e) { location.href = googleStartUrl(); return Promise.resolve(); }
+    if (btn) btn.disabled = false;
+    if (hint) hint.style.display = '';
+    if (hint) hint.textContent = 'Continue at Google in the new tab, then come back to the app.';
+    return Promise.resolve();
+  }
+
   location.href = googleStartUrl();
   return Promise.resolve();
 }
@@ -3782,7 +3889,11 @@ function enterCustomerMode() {
     document.documentElement.dataset.theme === 'dark' ? '#0f0f0f' : '#f1f1ee';
 
   document.querySelectorAll('link[rel="stylesheet"]').forEach(link => {
-    if ((link.getAttribute('href') || '').indexOf('portal.css') === -1) link.remove();
+    const href = link.getAttribute('href') || '';
+    // Keep the portal's own sheet AND the theme font. Removing Inter here used to
+    // leave the portal in the browser's default face while the staff app beside it
+    // was in Inter — the one visible seam between the two halves of the product.
+    if (href.indexOf('portal.css') === -1 && !/fonts\.(?:googleapis|gstatic)\.com/.test(href)) link.remove();
   });
   // The whole staff document, in one statement. #app-container is display:none until
   // showApp() and the sign-in screen is a sibling of it, so removing the container
@@ -3822,7 +3933,7 @@ function enterCustomerMode() {
     cssReady.then(() => {
       if (window.CustomerPortal) window.CustomerPortal.mount(root);
     }).catch(() => {
-      root.innerHTML = '<p style="padding:2rem;font:15px/1.5 system-ui,sans-serif">' +
+      root.innerHTML = '<p style="padding:2rem;font-family:inherit;font-size:15px;line-height:1.5">' +
         'Could not load your space. Check your connection, then reload this page.</p>';
     });
   };
@@ -3835,7 +3946,7 @@ function enterCustomerMode() {
   // no retry button, because the thing that failed is the fetch and a reload is the
   // retry — the customer's session is still in storage and survives it.
   js.onerror = () => {
-    root.innerHTML = '<p style="padding:2rem;font:15px/1.5 system-ui,sans-serif">' +
+    root.innerHTML = '<p style="padding:2rem;font-family:inherit;font-size:15px;line-height:1.5">' +
       'Could not load your space. Check your connection, then reload this page.</p>';
   };
   // Into the HEAD, not the body: the body is the portal's, and it is asserted to hold
@@ -4977,8 +5088,12 @@ function renderDock() {
 // layout pass, and renderDock() refetches the ticket's activity list. Toggling a class
 // hides the sheet in the maximised state without touching the DOM that is already there.
 function applyDockState() {
-  const on  = dockIRs.length > 0 && (currentView === 'index' || currentView === 'detail');
-  const win = !!dockOpen && currentView === 'index';
+  // The dock is desktop-only: on a phone the tabs would cover the screen and the
+  // sheet is a second window, so nothing is docked there (openDock goes straight
+  // to the full ticket). `has-dock` is the single writer of the padding those
+  // screens reserve, so keeping it off on mobile also removes that padding.
+  const on  = mqDesktop.matches && dockIRs.length > 0 && (currentView === 'index' || currentView === 'detail');
+  const win = mqDesktop.matches && !!dockOpen && currentView === 'index';
   document.body.classList.toggle('has-dock', on);
   const el = document.getElementById('ir-dock');
   if (el) el.classList.toggle('has-window', win);
@@ -5130,6 +5245,10 @@ function dockSheetHTML(irNumber) {
 // disagree-ing about which was current.
 function openDock(irNumber) {
   if (!irNumber) return;
+  // A phone has neither the width for a strip of tabs nor a reason to keep two
+  // tickets minimised against each other. One tap goes to the full ticket screen,
+  // which is where the sections are; the dock stays a desktop tool.
+  if (!mqDesktop.matches) { goTicket(irNumber); return; }
   if (!dockIRs.includes(irNumber)) dockIRs.push(irNumber);
   dockOpen = irNumber;
   persistDockWorklist();
@@ -12766,6 +12885,9 @@ async function openPassbook(irNumber) {
   document.getElementById('ir-banner-sub').textContent =
     [currentIR.droneId, currentIR.companyName, currentIR.customerName || currentIR.contactEmail]
       .filter(Boolean).join(' · ') || '—';
+  // Phone: open each ticket with the identity strip folded away, so the section
+  // the person came for is the first thing on the screen. Desktop leaves it open.
+  applyBannerCollapsed(!mqDesktop.matches);
   if (bannerPills) {
     // This IR may not be in allIRs yet (deep link into a list that has not
     // loaded), so apply its app-owned state directly instead of relying on the
@@ -16070,7 +16192,11 @@ function alertUnsavedChange(unitId, err) {
     fd.append('irNumber', irNumber);
     fd.append('sectionId', unitId);
     fd.append('message', String((err && err.message) || err || 'unknown error').slice(0, 400));
-    fd.append('version', APP_VERSION);
+  fd.append('version', APP_VERSION);
+  // The installed app's session does not expire and is not retired by a browser
+  // sign-in. The backend treats a missing flag as the browser rule, so an older
+  // cached app.js keeps today's 8h30m session rather than failing.
+  if (isInstalledMobileApp()) fd.append('persistent', 'true');
     postJson(_origFetch, fd).catch(() => {});
   } catch (e) { /* the toast is the local guarantee; the notice is best-effort */ }
 }

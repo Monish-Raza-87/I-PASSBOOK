@@ -5,6 +5,12 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>I-PASSBOOK Help &amp; FAQ</title>
 <link rel="icon" type="image/png" sizes="512x588" href="assets/icon-mark-silver.png">
+<!-- The one thing this page fetches is the theme font. It stays readable offline
+     (the stack falls back to the system face), but online it must not be the only
+     screen in the product wearing a different typeface. -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,100..900&display=swap" rel="stylesheet">
 <style>
   /* ══════════════════════════════════════════════════════════════════════════
      THE APP'S OWN SKIN, RESTATED HERE.
@@ -79,7 +85,7 @@
     --radius: 0;
 
     --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
-    --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    --font-sans: 'Inter Variable', 'Inter', system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
     color-scheme: light;
   }
   /* The app's dark values, role for role. Note that --ind-ground and --ind-panel SWAP

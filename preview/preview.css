@@ -1183,12 +1183,9 @@
   --ind-white:         #f8f8f8;
 
   
-  --landing-panel-ground: #0b0b0b;
-  --landing-scrim: linear-gradient(180deg,
-    rgba(8, 8, 8, 0.56) 0%,
-    rgba(8, 8, 8, 0.34) 30%,
-    rgba(8, 8, 8, 0.56) 58%,
-    rgba(8, 8, 8, 0.88) 100%);
+  --landing-panel-ground: var(--surface-base);
+  
+  --landing-fade-mask: linear-gradient(180deg, #000 0, #000 82%, transparent 100%);
   --landing-ink: #f8f8f8;
   --landing-ink-muted: rgba(255, 255, 255, 0.76);
   --landing-ink-rule: rgba(255, 255, 255, 0.55);

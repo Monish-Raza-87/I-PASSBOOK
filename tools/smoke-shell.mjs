@@ -1557,6 +1557,12 @@ head('the landing page offers two doors, stacked, each of them collapsible');
     /\.wa-corner \{[\s\S]*?position: fixed/.test(baseCss) &&
     /\.wa-corner \{[\s\S]*?env\(safe-area-inset-bottom/.test(baseCss) &&
     /\.wa-corner \{[\s\S]*?env\(safe-area-inset-right/.test(baseCss));
+  // ON A PHONE THE PILL IS A DISC. 165px of fixed furniture landed across the
+  // Help & FAQ line and the credit; the markup note always said the phone gets
+  // the glyph alone, and this is the rule that finally does it.
+  ok('...and on a phone it is the mark alone, not a 165px pill over the foot',
+    /@media \(max-width: 639px\) \{[\s\S]*?\.wa-label \{ display: none; \}/.test(baseCss) &&
+    /@media \(max-width: 639px\) \{[\s\S]*?\.wa-glyph \{ width: 46px; height: 46px; \}/.test(baseCss));
 }
 
 // ── The two halves of one ground ────────────────────────────────────────────────

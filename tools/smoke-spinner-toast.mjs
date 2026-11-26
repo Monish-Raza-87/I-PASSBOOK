@@ -139,6 +139,16 @@ r.ok('the class toggle is `.show` and nothing else',
   /toast\.classList\.remove\('show'\)/.test(appCode) &&
   /#toast\.show\s*\{/.test(baseCss));
 
+// A hidden toast must be INVISIBLE, not merely slid down. On the phone the pill
+// sits above the bottom bar, and 140% of a one-line pill left its top edge — and
+// the ::before dot — peeking over the landing page's credit line.
+const toastBlock = (baseCss.match(/#toast \{([\s\S]*?)\n\}/) || [])[1] || '';
+r.ok('...and a hidden toast is neither painted nor tappable',
+  /opacity:\s*0/.test(toastBlock) && /visibility:\s*hidden/.test(toastBlock) &&
+  /pointer-events:\s*none/.test(toastBlock) &&
+  /#toast\.show \{[^}]*opacity:\s*1[^}]*visibility:\s*visible[^}]*pointer-events:\s*auto/.test(baseCss),
+  toastBlock.slice(0, 200));
+
 r.ok('there is no queue anywhere in the toast — no array, no push, no shift',
   (() => {
     const start = appCode.indexOf('function showToast');

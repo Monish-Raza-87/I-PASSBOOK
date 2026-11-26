@@ -361,6 +361,21 @@ r.ok('...and types no address or number of its own',
   crBody.length > 0 && !/@/.test(crBody) && !/\+?\d[\d ]{6,}/.test(crBody));
 
 // ═══════════════════════════════════════════════════════════════════════════════
+r.head('a panel opened from the home route never leaves only the page chrome');
+// ═══════════════════════════════════════════════════════════════════════════════
+// The home route hides #portal on purpose, and `portal-panel-open` hides the
+// marketing band. The footer's Products/Support links and the company menu reach
+// openPanel() directly from there, so openPanel has to bring the container back;
+// without that every section is hidden and the customer sees header + footer only.
+r.ok('openPanel brings the portal container back and replaces the tiles',
+  /function openPanel\(name\) \{[\s\S]{0,900}?const portal = \$\('portal'\);[\s\S]{0,120}?portal\.hidden = false/.test(portal) &&
+  /function openPanel\(name\) \{[\s\S]{0,900}?tilesWrap\.hidden = true/.test(portal));
+r.ok('...and the footer\'s Support link has a real route to the contact panel',
+  /contact: 'panel-contact'/.test(portal));
+r.ok('...and boot no longer opens the history panel before the route is known',
+  !/async function loadTickets\(\) \{\s*openPanel\('history'\);/.test(portal));
+
+// ═══════════════════════════════════════════════════════════════════════════════
 r.head('the customer header is read in the sans face, while the data stays mono');
 // ═══════════════════════════════════════════════════════════════════════════════
 // The industrial skin sets a mono face on almost every small label. That is right for

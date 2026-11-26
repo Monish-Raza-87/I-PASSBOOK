@@ -526,8 +526,40 @@ try {
   // ════════════════════════════════════════════════════════════════════════════
   await goto('customer', 414);
   await waitFor(`document.querySelectorAll('#ticket-list .ticket').length > 0`);
-  ok('the list paints', await visible('#reports') && await visible('#reports-list'));
   ok('...and the header names the account, not the person', /Acme Survey/.test(await evaluate(`document.getElementById('header-who').textContent`)));
+
+  // THE BLANK PAGE THIS SUITE IS HERE TO CATCH. The home route deliberately
+  // leaves #portal closed, and `portal-panel-open` hides the marketing band. A
+  // panel opened from the footer or the company menu used to set that class
+  // without bringing #portal back — so every section on the page was hidden and
+  // the customer was left with the header and footer only.
+  ok('the signed-in home leaves the portal closed and still shows the marketing page',
+    await evaluate(`document.getElementById('portal').hidden`) && await visible('#products'));
+  await evaluate(`document.querySelector('.foot a[data-open-panel="library"]').click()`);
+  await SLEEP(250);
+  ok('a footer panel link brings its container back instead of blanking the page',
+    !(await evaluate(`document.getElementById('portal').hidden`)) &&
+    await visible('#panel-library') &&
+    !(await visible('#products')),
+    await evaluate(`JSON.stringify({ portal: document.getElementById('portal').hidden,
+      panel: document.getElementById('panel-library').hidden,
+      products: getComputedStyle(document.getElementById('products')).display })`));
+  await evaluate(`location.hash = ''`);
+  await SLEEP(200);
+  await evaluate(`document.getElementById('header-who').click()`);
+  await evaluate(`document.querySelector('#company-menu [data-detail="fleet"]').click()`);
+  await SLEEP(250);
+  ok('the company menu can open Fleet from the home route, and the portal comes with it',
+    !(await evaluate(`document.getElementById('portal').hidden`)) && await visible('#panel-fleet'));
+  await evaluate(`location.hash = ''`);
+  await SLEEP(200);
+
+  // The list lives behind the history route; assert it there, where a customer
+  // really sees it.
+  await evaluate(`location.hash = '#/support/history'`);
+  await waitFor(`!document.getElementById('portal').hidden && !document.getElementById('reports').hidden`);
+  ok('the list paints on the history route',
+    await visible('#reports') && await visible('#reports-list'));
 
   // The in-app report form: the owner's new door must actually open, and the
   // model dropdown must own the serial prefix.

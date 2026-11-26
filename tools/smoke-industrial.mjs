@@ -389,6 +389,12 @@ r.ok('...and one scrim token, not a stack of local washes, keeps the type readab
   (landingPhone.match(/\.auth-brand-panel::after\s*\{[^}]*\}/) || [''])[0]);
 r.ok('...and the doors and their head sit in their own layer above it',
   /\.auth-main\s*\{[\s\S]{0,240}?position:\s*relative[\s\S]{0,240}?z-index:\s*1/.test(landingPhone));
+r.ok('...and they START below the mark, so the logo is never covered',
+  /\.auth-main\s*\{[\s\S]{0,1400}?justify-content:\s*flex-start/.test(landingPhone) &&
+  /\.auth-main\s*\{[\s\S]{0,1600}?padding:\s*calc\(30dvh \+ min\(46\.6vw, 225px\)/.test(landingPhone));
+r.ok('...and the empty column cannot swallow the replay control\'s tap',
+  /\.auth-main\s*\{[\s\S]{0,1800}?pointer-events:\s*none/.test(landingPhone) &&
+  /\.auth-main > \*\s*\{\s*pointer-events:\s*auto/.test(landingPhone));
 r.ok('the landing ink and control colours are declared in base.css, and are not --ind-*',
   landingUsed.size >= 6 && [...landingUsed].every(t => landingTokens.has(t)) &&
   landingTokens.size > 0 && ![...landingTokens].some(t => /^--ind-/.test(t)),

@@ -2044,6 +2044,26 @@ r.ok('...and a phone tap opens the full ticket instead of a dock tab',
 r.ok('...and applyDockState refuses to mark the body on a phone',
   /const on\s*=\s*mqDesktop\.matches && dockIRs\.length > 0/.test(appCode));
 
+// ── The post-login Quick unlock offer ────────────────────────────────────────
+r.head('the post-login Quick unlock offer is one-time and shares the one enrolment path');
+r.ok('the offer is built as a dialog with a dismiss and a setup action',
+  /function openQuickUnlockOffer/.test(appCode) &&
+  /quick-offer-modal/.test(appCode) &&
+  /id="quick-offer-later"/.test(appCode) && /id="quick-offer-setup"/.test(appCode));
+r.ok('...and its setup action calls the same beginQuickUnlockSetup as the avatar row',
+  (appCode.match(/beginQuickUnlockSetup\(\)/g) || []).length >= 2);
+r.ok('...its copy is honest about being device-local, never cross-device',
+  /kept on this device/.test(appCode) && !/across all your devices/i.test(appCode));
+r.ok('...it is never shown to an enrolled device or a snoozed account',
+  /if \(loadUnlock\(\)\) return;/.test(appCode) &&
+  /Date\.now\(\) < unlockOfferUntil\(currentUser\.email\)/.test(appCode));
+r.ok('...and enrolling clears the snooze while removal sets one',
+  /clearUnlockOfferSnooze\(rec\.email\)/.test(appCode) &&
+  /snoozeUnlockOffer\(st\.email, 30\)/.test(appCode));
+r.ok('the sheet is styled, including a phone bottom-sheet layout',
+  /\.quick-offer-modal \{/.test(componentsCode) &&
+  /@media \(max-width: 639px\) \{[\s\S]*?\.quick-offer-modal \{ align-items:\s*flex-end/.test(componentsCode));
+
 // ── The harness itself ────────────────────────────────────────────────────────
 r.head('the stub DOM is faithful enough for these assertions to be able to fail');
 r.ok('classList.toggle remembers, in both the one- and two-argument form',

@@ -987,6 +987,63 @@ input[type="radio"] { accent-color: var(--surface-gray-10); }
    a 320px viewport inside the overlay's own 1rem padding, so it stays a card with
    margins rather than becoming a full-bleed sheet for no reason. */
 
+/* ── The post-login Quick unlock offer ──
+   A one-time, dismissible sheet. It shares the modal ground and card language;
+   on a phone it becomes a bottom sheet so the primary action sits under the
+   thumb. It is the discoverability half of the feature whose enrolment lives in
+   the avatar menu. */
+.quick-offer-modal {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal);
+  background: rgb(0 0 0 / 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  animation: fadeIn 0.15s ease;
+}
+[data-theme="dark"] .quick-offer-modal { background: rgb(0 0 0 / 0.65); }
+.quick-offer-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  width: 100%;
+  max-width: 30rem;
+  background: var(--surface-elevation-2);
+  border: 1px solid var(--outline-elevation-2);
+  border-radius: var(--radius-6);
+  box-shadow: var(--elevation-2xl);
+  padding: 1.25rem;
+}
+.quick-offer-title { margin: 0; font-size: var(--text-lg); font-weight: var(--weight-semibold); color: var(--ink-gray-9); }
+.quick-offer-lede { margin: 0; font-size: var(--text-base); line-height: 1.5; color: var(--ink-gray-9); }
+.quick-offer-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.45rem; }
+.quick-offer-list li { position: relative; padding-left: 1.4rem; font-size: var(--text-sm); line-height: 1.45; color: var(--ink-gray-7); }
+.quick-offer-list li::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0.5em;
+  width: 0.55rem;
+  height: 0.3rem;
+  border-left: 2px solid var(--accent);
+  border-bottom: 2px solid var(--accent);
+  transform: rotate(-45deg);
+}
+.quick-offer-foot { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 0.5rem; margin-top: 0.25rem; }
+.quick-offer-foot .btn { width: auto; }
+@media (max-width: 639px) {
+  .quick-offer-modal { align-items: flex-end; padding: 0; }
+  .quick-offer-card {
+    max-width: none;
+    border-radius: var(--radius-6) var(--radius-6) 0 0;
+    padding-bottom: calc(1.25rem + env(safe-area-inset-bottom, 0px));
+  }
+  .quick-offer-foot { flex-direction: column-reverse; }
+  .quick-offer-foot .btn { width: 100%; min-height: 44px; }
+}
+
 /* ── Triage modal (status / assignee / priority / type) ──
    Stacked label-above-control rows so it stays readable at phone width, which
    is where warehouse staff will actually use it. */

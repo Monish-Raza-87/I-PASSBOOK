@@ -320,25 +320,6 @@
 
     </div><!-- /.auth-brand-panel -->
 
-    <!-- ── THE CORNER ──
-         Where every site in this shape puts "Sign Up", and this one cannot: there is
-         no sign-up, because every account is provisioned by an admin. So the corner
-         holds the thing a person who cannot get in actually needs instead — a way to
-         reach the desk. The owner's instruction, 2026-10-08: *"since we do not have any
-         signup options … we would have whatsapp button instead there, so that who so
-         ever wants any further help can click on that button and come to official
-         indrones after sales whatsapp chat with us ready to receive them there."*
-
-         IT IS HIDDEN UNTIL A NUMBER EXISTS. An href of '#' that opens an empty tab is
-         worse than no button, so app.js fills this in from CONFIG.WHATSAPP_URL and
-         leaves it off the screen entirely while that is empty. A glyph with no text
-         beside it, because the corner is 44px wide on a phone. -->
-    <a class="wa-corner" id="whatsapp-btn" href="#" target="_blank" rel="noopener noreferrer"
-       style="display:none" data-i18n-aria="door.whatsapp" data-i18n-title="door.whatsapp">
-      <span class="wa-label" data-i18n="door.whatsappCta">Get in touch</span>
-      <span class="wa-glyph" aria-hidden="true"></span>
-    </a>
-
     <!-- ── THE RIGHT OF THE SPLIT: everything that used to be a direct child ──
          Below 1024px this div is transparent markup — the column is #auth-container's own
          and this changes nothing. At 1024px and wider it becomes the right half, and it is
@@ -706,6 +687,27 @@
         <div class="landing-lang">
           <select id="lang-select" aria-label="Language" data-i18n-aria="landing.language"></select>
         </div>
+        <!-- ── THE CORNER ──
+             Where every site in this shape puts "Sign Up", and this one cannot: there is
+             no sign-up, because every account is provisioned by an admin. So the corner
+             holds the thing a person who cannot get in actually needs instead — a way to
+             reach the desk. The owner's instruction, 2026-10-08: *"since we do not have any
+             signup options … we would have whatsapp button instead there, so that who so
+             ever wants any further help can click on that button and come to official
+             indrones after sales whatsapp chat with us ready to receive them there."*
+
+             IT IS HIDDEN UNTIL A NUMBER EXISTS. An href of '#' that opens an empty tab is
+             worse than no button, so app.js fills this in from CONFIG.WHATSAPP_URL and
+             leaves it off the screen entirely while that is empty.
+
+             IT LIVES IN THE FOOT ROW so the desktop's fixed pill and the phone's 46px
+             disc are the same element: fixed takes it out of this row on a desktop,
+             static leaves it beside Help & FAQ and the language picker on a phone. -->
+        <a class="wa-corner" id="whatsapp-btn" href="#" target="_blank" rel="noopener noreferrer"
+           style="display:none" data-i18n-aria="door.whatsapp" data-i18n-title="door.whatsapp">
+          <span class="wa-label" data-i18n="door.whatsappCta">Get in touch</span>
+          <span class="wa-glyph" aria-hidden="true"></span>
+        </a>
       </div>
 
       <!-- The credit sits on the LANDING SCREEN, not only inside the app: it is the one

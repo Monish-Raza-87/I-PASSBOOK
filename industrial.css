@@ -1501,32 +1501,43 @@
 
 
 /* ------------------------------------------------------------------------------
-   MOBILE LANDING � THE FILM IS THE FIELD, THE DOORS ARE IN FRONT
+   MOBILE LANDING — THREE FIFTHS FILM, TWO FIFTHS DOORS
    ------------------------------------------------------------------------------
-   Below 1024px the two-column split is dropped. The brand stage becomes a
-   full-viewport, fixed backdrop, the brand lockup stays at the top, and the
-   login column sits over it. This is deliberately scoped to the phone/tablet
-   widths only: the desktop split is a different composition and is unchanged.
+   Below 1024px the two-column split is dropped for a hard HORIZONTAL split of the
+   screen: the upper 3/5 is the brand — I-PASSBOOK and the intro film — and the
+   lower 2/5 is the landing column. The two rows are 3fr and 2fr of 100dvh, so the
+   proportion holds on every phone height; the lower row scrolls inside itself
+   when the doors and their foot need more than their share.
 
-   The film is light artwork, so a scrim is not decoration: it is what keeps
-   white type and the glass doors readable. The still is the base layer and the
-   video is only the one-time introduction, exactly as before. */
+   The film is light artwork, so a scrim is not decoration: it is what keeps the
+   white brand head readable over it. The still is the base layer and the video is
+   only the one-time introduction, exactly as before.
+
+   A DOOR, ONCE OPENED, IS THE WHOLE SCREEN. The owner asked for the bars to sit
+   collapsed in the lower fifth and for the chosen form to open full-screen, so
+   `body.door-open` (set by setDoor) hides the rest of the landing and the open
+   door becomes a fixed sheet. The bar stays at the top as the way back. */
 @media (max-width: 1023px) {
   #auth-container {
+    position: relative;
     flex-direction: column;
+    align-items: stretch;
     justify-content: flex-start;
+    height: 100dvh;
     min-height: 100dvh;
     padding: 0;
-    overflow-y: auto;
-    background: transparent;
+    overflow: hidden;
+    background: var(--landing-panel-ground);
   }
 
   #auth-container .auth-brand-panel {
-    position: fixed;
-    inset: 0;
+    position: relative;
+    inset: auto;
+    flex: 3 1 0;
     z-index: 0;
     width: 100%;
-    height: 100dvh;
+    height: auto;
+    min-height: 0;
     padding: 0;
     overflow: hidden;
     pointer-events: none;
@@ -1547,7 +1558,7 @@
     background-color: var(--landing-panel-ground);
     background-image: var(--landing-mark);
     background-repeat: no-repeat;
-    background-position: center 30%;
+    background-position: center 45%;
     background-size: min(58vw, 280px) auto;
   }
 
@@ -1572,7 +1583,7 @@
   }
 
   #auth-container .auth-brand-panel .landing-head {
-    position: fixed;
+    position: absolute;
     top: calc(env(safe-area-inset-top, 0px) + 1.05rem);
     left: 1.1rem;
     right: 1.1rem;
@@ -1588,6 +1599,7 @@
   #auth-container .auth-brand-panel .landing-full { color: var(--landing-ink-muted); }
 
   #auth-container .auth-brand-panel .brand-replay {
+    position: absolute;
     top: calc(env(safe-area-inset-top, 0px) + 1.05rem);
     right: 1rem;
     bottom: auto;
@@ -1597,66 +1609,77 @@
   }
 
   #auth-container .auth-main {
+    flex: 2 1 0;
     position: relative;
     z-index: 1;
     width: 100%;
-    /* The column is as tall as its contents, not the viewport: the fixed panel is
-       already the full-screen ground, and a 100dvh column forced the WhatsApp disc
-       that follows it below an artificial full page. */
-    min-height: auto;
-    order: 1;
+    min-height: 0;
+    overflow-y: auto;
     display: flex;
     flex-direction: column;
     align-items: center;
-    /* THE CONTENT STARTS UNDER THE MARK, NOT OVER IT. `background-position:
-       center 30%` puts the mark's TOP at 30% of the leftover space, so its bottom
-       is 30dvh + 70% of its rendered height. The still is the 512x588 brand mark
-       drawn min(58vw, 280px) wide, i.e. min(66.6vw, 321.6px) tall — 70% of that is
-       min(46.6vw, 225px). Reserving it plus a breath keeps the lockup, the doors
-       and their foot below the logo on a short phone as well as a tall one; the
-       flex-end this replaced pinned them to the bottom and let them climb over the
-       mark whenever the screen was not tall enough. */
     justify-content: flex-start;
-    gap: 1rem;
-    padding: calc(30dvh + min(46.6vw, 225px) + 1.75rem) 1rem
-             calc(3.5rem + env(safe-area-inset-bottom, 0px));
-    background: transparent;
-    /* The column is full-viewport and sits above the fixed panel, so its empty
-       area swallowed the taps meant for the replay control (the panel's own
-       child). Nothing on this layer is a backdrop; the controls inside it get
-       their taps back below. */
-    pointer-events: none;
+    gap: 0.75rem;
+    padding: 1rem 1rem calc(1rem + env(safe-area-inset-bottom, 0px));
+    background: var(--ind-panel);
+    border-top: 1px solid var(--ind-rule);
   }
-  #auth-container .auth-main > * { pointer-events: auto; }
 
-  #auth-container .auth-main .landing-welcome { color: var(--landing-ink-muted); }
-  #auth-container .auth-main .landing-login { color: var(--landing-ink); }
-  #auth-container .auth-main .landing-full { color: var(--landing-ink-muted); }
+  /* The lower fifth is paper, not film: the landing ink is the app's normal ink
+     again, and the language picker keeps its native light/dark surface. */
+  #auth-container .auth-main .landing-welcome { color: var(--ind-muted); }
+  #auth-container .auth-main .landing-login { color: var(--ink-gray-9); }
   #auth-container .auth-main .landing-terms,
-  #auth-container .auth-main .landing-terms span { color: var(--landing-ink-muted); }
+  #auth-container .auth-main .landing-terms span { color: var(--ind-muted); }
   #auth-container .auth-main .landing-terms a {
-    color: var(--landing-ink);
-    text-decoration-color: var(--landing-ink-rule);
-  }
-  #auth-container .auth-main .landing-lang select {
-    background: var(--landing-select-bg);
-    border-color: var(--landing-select-edge);
-    color: var(--landing-select-ink);
+    color: var(--accent);
+    text-decoration-color: currentColor;
   }
 
-  /* The first viewport is the brand; the doors stay reachable by scrolling on a
-     very short device rather than shrinking the form to fit. */
-  #auth-container .auth-main .doors { margin-top: 0; }
+  #auth-container .auth-main .landing-lockup { margin-bottom: 0.25rem; }
+  #auth-container .auth-main .doors { margin-top: 0; gap: 0.5rem; }
+  /* The acknowledgement and the foot sit at the BOTTOM of their fifth. */
+  #auth-container .auth-main .landing-terms { margin-top: auto; }
+  #auth-container .auth-main .landing-foot { margin-top: 0.25rem; }
+  #auth-container .auth-main .app-credit { margin-top: 0.5rem; }
 
-  /* The corner chat is part of the page on a phone, after the credit. `margin-top:
-     auto` puts it in the bottom-right of the viewport when the content is shorter
-     than the screen, and after the content when it is not — so it never sits over
-     a door. The fixed pill is a desktop affordance. */
+  /* A door, once opened, is the whole screen. */
+  #auth-container .door[data-open="1"] {
+    position: fixed;
+    inset: 0;
+    z-index: 60;
+    width: auto;
+    max-width: none;
+    margin: 0;
+    border: 0;
+    overflow-y: auto;
+    background: var(--ind-panel);
+    -webkit-backdrop-filter: none;
+            backdrop-filter: none;
+  }
+  #auth-container .door[data-open="1"] .door-bar {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    min-height: 60px;
+    padding-top: calc(0.5rem + env(safe-area-inset-top, 0px));
+    padding-bottom: 0.5rem;
+    background: var(--ind-panel);
+    border-bottom: 1px solid var(--ind-rule);
+  }
+  #auth-container .door[data-open="1"] .door-body {
+    padding-bottom: calc(1.5rem + env(safe-area-inset-bottom, 0px));
+  }
+  #auth-container:has(.door[data-open="1"]) .auth-main > :not(.doors) { display: none; }
+  #auth-container:has(.door[data-open="1"]) .door:not([data-open="1"]) { display: none; }
+  #auth-container:has(.door[data-open="1"]) .wa-corner { display: none; }
+
+  /* The corner chat is a third item in the foot row on a phone: a 46px disc beside
+     Help & FAQ and the language picker, in the lower fifth's flow. The desktop pill
+     stays fixed, so this element is the same node in both places. */
   #auth-container .wa-corner {
     position: static;
-    order: 2;
-    align-self: flex-end;
-    margin: auto 1rem calc(0.9rem + env(safe-area-inset-bottom, 0px)) 0;
+    margin: 0;
     pointer-events: auto;
   }
 }

@@ -1196,6 +1196,8 @@
   --landing-select-edge: rgba(255, 255, 255, 0.42);
   --landing-select-ink: #0b0b0b;
   --landing-mark: url("assets/icon-mark-silver.png");
+  
+  --landing-mark-mobile: url("assets/brand-lockup-telemetry.png");
 
   
   --ind-paper:         #ffffff;

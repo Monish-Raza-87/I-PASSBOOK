@@ -381,18 +381,18 @@ const landingPhone = (css.match(/@media \(max-width: 1023px\)\s*\{([\s\S]*?)\n\}
 const landingTokens = new Set([...base.matchAll(/(--landing-[a-zA-Z0-9-]+)\s*:/g)].map(m => m[1]));
 const landingUsed = new Set([...landingPhone.matchAll(/var\(\s*(--landing-[a-zA-Z0-9-]+)/g)].map(m => m[1]));
 
-r.ok('the phone composition is a real 1023px block with a 3fr/2fr screen split',
+r.ok('the phone gives the lower column its real height, and the film takes the rest',
   landingPhone.length > 0 &&
-  /\.auth-brand-panel \{[^}]*flex:\s*3 1 0/.test(landingPhone) &&
-  /\.auth-main \{[^}]*flex:\s*2 1 0/.test(landingPhone) &&
+  /\.auth-brand-panel \{[^}]*flex:\s*1 1 auto[^}]*min-height:\s*30dvh/.test(landingPhone) &&
+  /\.auth-main \{[^}]*flex:\s*0 0 auto/.test(landingPhone) &&
   /#auth-container \{[^}]*height:\s*100dvh/.test(landingPhone));
-r.ok('...the film is the upper fifth, cropped to fill it',
+r.ok('...the film is cropped to fill whatever height is left',
   /\.brand-video\.brand-video\s*\{[^}]*object-fit:\s*cover/.test(landingPhone));
 r.ok('...and one scrim token, not a stack of local washes, keeps the brand head readable',
   /#auth-container \.auth-brand-panel::after\s*\{[^}]*background:\s*var\(--landing-scrim\)/.test(landingPhone),
   (landingPhone.match(/\.auth-brand-panel::after\s*\{[^}]*\}/) || [''])[0]);
-r.ok('...and the doors are the lower fifth, scrolling inside it on paper',
-  /\.auth-main \{[^}]*overflow-y:\s*auto/.test(landingPhone) &&
+r.ok('...and the doors sit on paper at their real height, with nothing clipped',
+  /\.auth-main \{[^}]*overflow:\s*visible/.test(landingPhone) &&
   /\.auth-main \{[^}]*background:\s*var\(--ind-panel\)/.test(landingPhone));
 r.ok('...and an opened door leaves the split for the whole screen',
   /\.door\[data-open="1"\] \{[^}]*position:\s*fixed[^}]*inset:\s*0/.test(landingPhone) &&
@@ -400,6 +400,17 @@ r.ok('...and an opened door leaves the split for the whole screen',
   /#auth-container:has\(\.door\[data-open="1"\]\) \.door:not\(\[data-open="1"\]\) \{ display:\s*none; \}/.test(landingPhone));
 r.ok('...and the corner chat is a third item in the foot row, not a floating pill',
   /#auth-container \.wa-corner \{[^}]*position:\s*static/.test(landingPhone));
+r.ok('...the film\'s resting still is the Option A telemetry lockup, not the silver mark',
+  /--landing-mark-mobile:\s*url\("assets\/brand-lockup-telemetry\.png"\)/.test(base) &&
+  /\.brand-still \{[^}]*background-image:\s*var\(--landing-mark-mobile\)/.test(landingPhone) &&
+  /\.brand-still \{[^}]*background-size:\s*contain/.test(landingPhone) &&
+  /\.brand-still \{[^}]*background-origin:\s*content-box/.test(landingPhone));
+r.ok('...and that artwork is a real file the deploy serves',
+  fs.existsSync(new URL('../assets/brand-lockup-telemetry.png', import.meta.url)) &&
+  /'assets\/brand-lockup-telemetry\.png'/.test(deployJs));
+r.ok('...and the head and replay clear the status strip even when the inset reads 0',
+  /\.landing-head \{[^}]*top:\s*max\(calc\(env\(safe-area-inset-top, 0px\) \+ 0\.75rem\), 3rem\)/.test(landingPhone) &&
+  /\.brand-replay \{[^}]*top:\s*max\(calc\(env\(safe-area-inset-top, 0px\) \+ 0\.75rem\), 3rem\)/.test(landingPhone));
 r.ok('the film colours are declared in base.css, and are not --ind-*',
   landingUsed.size >= 5 && [...landingUsed].every(t => landingTokens.has(t)) &&
   landingTokens.size > 0 && ![...landingTokens].some(t => /^--ind-/.test(t)),

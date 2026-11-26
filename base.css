@@ -138,6 +138,10 @@
   --landing-select-edge: rgba(255, 255, 255, 0.42);
   --landing-select-ink: #0b0b0b;
   --landing-mark: url("assets/icon-mark-silver.png");
+  /* The phone's post-film lockup. Option A — the telemetry-grid mark with the
+     INDRONES / PASSBOOK sub-branding — is the artwork the owner asked to keep on
+     screen once the intro ends. Desktop keeps the silver mark. */
+  --landing-mark-mobile: url("assets/brand-lockup-telemetry.png");
 
   /* ── THE PAPER PAIR, BORROWED FROM THE COMPANY'S OWN SITE ──────────────────────
      indrones.com runs its full-width sections alternately pure white and warm

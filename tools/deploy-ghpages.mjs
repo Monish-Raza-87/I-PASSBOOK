@@ -114,6 +114,8 @@ const SERVED = [
   'assets/brand-panel-dark.png',
   'assets/brand-panel-light.png',
   'assets/brand-intro.mp4',
+  // The phone's post-film lockup, referenced from base.css's --landing-mark-mobile.
+  'assets/brand-lockup-telemetry.png',
   'assets/icon-192.png',
   'assets/icon-512.png',
   'assets/icon-mark.png',

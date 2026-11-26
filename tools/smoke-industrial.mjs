@@ -383,7 +383,7 @@ const landingUsed = new Set([...landingPhone.matchAll(/var\(\s*(--landing-[a-zA-
 
 r.ok('the phone gives the lower column its real height, and the film takes the rest',
   landingPhone.length > 0 &&
-  /\.auth-brand-panel \{[^}]*flex:\s*1 1 auto[^}]*min-height:\s*30dvh/.test(landingPhone) &&
+  /\.auth-brand-panel \{[^}]*flex:\s*1 1 auto[^}]*min-height:\s*0/.test(landingPhone) &&
   /\.auth-main \{[^}]*flex:\s*0 0 auto/.test(landingPhone) &&
   /#auth-container \{[^}]*height:\s*100dvh/.test(landingPhone));
 r.ok('...the film is cropped to fill whatever height is left',

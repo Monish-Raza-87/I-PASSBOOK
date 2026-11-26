@@ -19,7 +19,7 @@
 // the "update available" notice. That comparison is only meaningful because the
 // two numbers are pinned together — which is why the pin is load-bearing and not
 // just a tidy convention.
-const APP_VERSION = 'v157';
+const APP_VERSION = 'v158';
 
 // Fill every version slot on the page. One writer, so there is one place to look
 // when the number is wrong — the slots themselves are static markup, present on
@@ -2657,9 +2657,29 @@ function loadUnlock() {
 }
 function saveUnlock(rec) {
   try { localStorage.setItem(UNLOCK_KEY, JSON.stringify(rec)); } catch (e) { /* storage blocked */ }
+  // Enrolling answers the offer permanently: a record exists, so the post-login
+  // prompt never appears for this person again on this device.
+  if (rec && rec.email) clearUnlockOfferSnooze(rec.email);
 }
 function clearUnlock() {
   try { localStorage.removeItem(UNLOCK_KEY); } catch (e) { /* storage blocked */ }
+}
+
+// The one-time post-login offer, snoozed per ACCOUNT (not per device): a second
+// person signing in on the same phone is still shown it. Kept beside the unlock
+// record because they are the same feature's two halves.
+const UNLOCK_OFFER_PREFIX = 'ipb_unlock_offer_until:';
+function unlockOfferUntil(email) {
+  if (!email) return 0;
+  try { return Number(localStorage.getItem(UNLOCK_OFFER_PREFIX + email) || 0) || 0; } catch (e) { return 0; }
+}
+function snoozeUnlockOffer(email, days) {
+  if (!email) return;
+  try { localStorage.setItem(UNLOCK_OFFER_PREFIX + email, String(Date.now() + (days || 30) * 24 * 60 * 60 * 1000)); } catch (e) { /* storage blocked */ }
+}
+function clearUnlockOfferSnooze(email) {
+  if (!email) return;
+  try { localStorage.removeItem(UNLOCK_OFFER_PREFIX + email); } catch (e) { /* storage blocked */ }
 }
 
 // The platform-authenticator gate, resolved lazily: fingerprint support is not
@@ -3267,10 +3287,92 @@ function offerRemoveUnlock() {
   if (!st) return;
   if (window.confirm('Remove quick unlock from this device?')) {
     clearUnlock();
+    // Removing is a decision, not an invitation to ask again tomorrow.
+    snoozeUnlockOffer(st.email, 30);
     if (st.deviceToken) deviceRevokeBackend(st.deviceToken);
     showToast('Quick unlock removed.');
   }
   syncQuickUnlockMenu();
+}
+
+// ─── THE POST-LOGIN QUICK-UNLOCK OFFER ───────────────────────────────────────
+// Quick unlock existed only in the avatar menu, so the people most likely to
+// benefit never found it. This is the one-time, dismissible introduction: shown
+// after a signed-in screen when no unlock record exists, snoozed for 30 days on
+// "Not now", and never shown again once a record exists. It calls the SAME
+// beginQuickUnlockSetup() as the avatar row, so there is one enrolment path and
+// the two entries cannot drift.
+//
+// The copy is deliberately "Quick unlock", not "Passkey", and says "kept on this
+// device": the credential is residentKey:'discouraged' and registered per device,
+// so promising synced, cross-device passkeys would be a lie.
+function openQuickUnlockOffer() {
+  if (document.getElementById('quick-unlock-offer')) return;
+  const offer = document.createElement('div');
+  offer.id = 'quick-unlock-offer';
+  offer.className = 'quick-offer-modal';
+  offer.setAttribute('role', 'dialog');
+  offer.setAttribute('aria-modal', 'true');
+  offer.setAttribute('aria-labelledby', 'quick-offer-title');
+  offer.innerHTML =
+    '<div class="quick-offer-card">' +
+      '<h2 class="quick-offer-title" id="quick-offer-title">Set up Quick unlock</h2>' +
+      '<p class="quick-offer-lede">Sign in with your fingerprint, face, or a pattern instead of waiting for an email code.</p>' +
+      '<ul class="quick-offer-list">' +
+        '<li>Sign in without a password or a code</li>' +
+        '<li>Encrypted and kept on this device</li>' +
+        '<li>Change or remove it any time from your profile menu</li>' +
+      '</ul>' +
+      '<div class="quick-offer-foot">' +
+        '<button type="button" class="btn btn-secondary" id="quick-offer-later">Not now</button>' +
+        '<button type="button" class="btn" id="quick-offer-setup">Set up Quick unlock</button>' +
+      '</div>' +
+    '</div>';
+  document.body.appendChild(offer);
+  const email = (currentUser && currentUser.email) || '';
+  const dismiss = () => { snoozeUnlockOffer(email, 30); offer.remove(); };
+  offer.querySelector('#quick-offer-later').addEventListener('click', dismiss);
+  offer.querySelector('#quick-offer-setup').addEventListener('click', () => {
+    offer.remove();
+    beginQuickUnlockSetup();
+  });
+  offer.addEventListener('click', e => { if (e.target === offer) dismiss(); });
+  document.addEventListener('keydown', function onKey(e) {
+    if (e.key !== 'Escape') return;
+    document.removeEventListener('keydown', onKey);
+    dismiss();
+  });
+  const setup = offer.querySelector('#quick-offer-setup');
+  if (setup && typeof setup.focus === 'function') { try { setup.focus(); } catch (e) { /* fine */ } }
+}
+
+let _unlockOfferWaits = 0;
+function maybeOfferQuickUnlock() {
+  // Real browser DOM only. The smoke harness is a stub, and a modal built on it
+  // cannot be interactive; the offer is a UI affordance, not logic under test.
+  if (typeof HTMLElement === 'undefined' || !(document.body instanceof HTMLElement)) return;
+  if (!currentUser || !currentUser.email) return;
+  if (loadUnlock()) return;                       // already enrolled: never ask again
+  if (document.getElementById('quick-unlock-offer')) return;
+  if (document.getElementById('pattern-setup-overlay')) return;
+  const pc = document.getElementById('password-change');
+  if (pc && pc.style.display && pc.style.display !== 'none') return;
+  if (Date.now() < unlockOfferUntil(currentUser.email)) return;
+  // A toast (the legacy-archive notice is common at sign-in) sits above modals by
+  // design, so wait for it to clear rather than stack a dialog under a message the
+  // person cannot read. Capped so an endless stream of toasts cannot suppress it.
+  const toastEl = document.getElementById('toast');
+  if (toastEl && toastEl.classList.contains('show') && _unlockOfferWaits < 6) {
+    _unlockOfferWaits++;
+    setTimeout(maybeOfferQuickUnlock, 1200);
+    return;
+  }
+  _unlockOfferWaits = 0;
+  openQuickUnlockOffer();
+}
+function scheduleQuickUnlockOffer() {
+  if (typeof HTMLElement === 'undefined' || !(document.body instanceof HTMLElement)) return;
+  setTimeout(maybeOfferQuickUnlock, 800);
 }
 
 // In-app pattern setup: a small overlay carrying the same canvas engine. Two
@@ -5554,6 +5656,11 @@ function showApp() {
   appCont.style.display  = 'flex';
   const pc = document.getElementById('password-change');
   if (pc) pc.style.display = 'none';
+
+  // After the shell is on screen, introduce Quick unlock once per account. The
+  // guards inside skip an enrolled device and a snoozed account; the landing never
+  // reaches here (no currentUser), and the temp-password diversion returned above.
+  scheduleQuickUnlockOffer();
 
   // Idempotent: this function binds click listeners to the avatar, the bell and
   // the nav. A second call (re-login, router re-entry) would double-fire every

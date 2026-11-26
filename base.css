@@ -119,18 +119,19 @@
   --ind-black:         #0b0b0b;
   --ind-white:         #f8f8f8;
 
-  /* The mobile landing's film field. Declared here for the same reason as the two
-     above: industrial.css names tokens and never writes a raw colour. The scrim is
-     a full gradient token because a `linear-gradient(` in industrial.css is caught
-     by the same rule as a raw hex. These are NOT --ind-* names: that prefix is
-     reserved for the app's palette, and smoke-industrial.mjs checks the colour
-     tokens industrial.css may spend. */
-  --landing-panel-ground: #0b0b0b;
-  --landing-scrim: linear-gradient(180deg,
-    rgba(8, 8, 8, 0.56) 0%,
-    rgba(8, 8, 8, 0.34) 30%,
-    rgba(8, 8, 8, 0.56) 58%,
-    rgba(8, 8, 8, 0.88) 100%);
+  /* The mobile landing's paper and its seam. Declared here for the same reason as
+     the two above: industrial.css names tokens and never writes a raw colour. The
+     film used to sit on #0b0b0b under a dark scrim; the owner asked for the picture
+     to have no tint around it and for the form below to be the same paper the
+     lockup is printed on, so both are the app's own surface now. The mask is a full
+     gradient token because a `linear-gradient(` in industrial.css is caught by the
+     same rule as a raw hex. These are NOT --ind-* names: that prefix is reserved
+     for the app's palette, and smoke-industrial.mjs checks the colour tokens
+     industrial.css may spend. */
+  --landing-panel-ground: var(--surface-base);
+  /* The film's own bottom edge goes transparent, so it dissolves into the paper
+     below instead of meeting it at a ruled line. */
+  --landing-fade-mask: linear-gradient(180deg, #000 0, #000 82%, transparent 100%);
   --landing-ink: #f8f8f8;
   --landing-ink-muted: rgba(255, 255, 255, 0.76);
   --landing-ink-rule: rgba(255, 255, 255, 0.55);

@@ -388,9 +388,12 @@ r.ok('the phone gives the lower column its real height, and the film takes the r
   /#auth-container \{[^}]*height:\s*100dvh/.test(landingPhone));
 r.ok('...the film is cropped to fill whatever height is left',
   /\.brand-video\.brand-video\s*\{[^}]*object-fit:\s*cover/.test(landingPhone));
-r.ok('...and one scrim token, not a stack of local washes, keeps the brand head readable',
-  /#auth-container \.auth-brand-panel::after\s*\{[^}]*background:\s*var\(--landing-scrim\)/.test(landingPhone),
-  (landingPhone.match(/\.auth-brand-panel::after\s*\{[^}]*\}/) || [''])[0]);
+r.ok('...and the film fades into the paper below instead of ending on a rule',
+  /\.brand-video\.brand-video\s*\{[^}]*mask-image:\s*var\(--landing-fade-mask\)/.test(landingPhone) &&
+  !/#auth-container \.auth-main \{[^}]*border-top/.test(landingPhone));
+r.ok('...and the film and the form are the same paper, not black above white',
+  /--landing-panel-ground:\s*var\(--surface-base\)/.test(base) &&
+  /\.brand-still \{[^}]*background-color:\s*var\(--landing-panel-ground\)/.test(landingPhone));
 r.ok('...and the doors sit on paper at their real height, with nothing clipped',
   /\.auth-main \{[^}]*overflow:\s*visible/.test(landingPhone) &&
   /\.auth-main \{[^}]*background:\s*var\(--ind-panel\)/.test(landingPhone));
@@ -414,7 +417,7 @@ r.ok('...and the phone head is clipped, so it never prints over the lockup',
   /\.landing-head \{[^}]*overflow:\s*hidden/.test(landingPhone) &&
   /\.landing-head \{[^}]*clip-path:\s*inset\(50%\)/.test(landingPhone));
 r.ok('the film colours are declared in base.css, and are not --ind-*',
-  landingUsed.size >= 4 && [...landingUsed].every(t => landingTokens.has(t)) &&
+  landingUsed.size >= 3 && [...landingUsed].every(t => landingTokens.has(t)) &&
   landingTokens.size > 0 && ![...landingTokens].some(t => /^--ind-/.test(t)),
   { used: [...landingUsed], declared: [...landingTokens] });
 

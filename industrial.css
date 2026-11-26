@@ -1569,7 +1569,7 @@
     background-color: var(--landing-panel-ground);
     /* Option A, not the silver mark: the owner asked for this lockup to stay on
        screen once the film ends. It is drawn with `contain` inside the content
-       box, and that box starts BELOW the brand head so the two never overlap. */
+       box, and that box leaves the top band for the replay control. */
     background-image: var(--landing-mark-mobile);
     background-repeat: no-repeat;
     background-position: center center;
@@ -1582,22 +1582,14 @@
   #auth-container .auth-brand-panel[data-brand="video"] .brand-video.brand-video {
     opacity: 1;
     object-fit: cover;
-    -webkit-mask-image: none;
-            mask-image: none;
+    /* The film has no tint over it any more, so its only edge treatment is this
+       fade: the picture's own bottom goes transparent and the paper below shows
+       through, which is the smooth separator the owner asked for. */
+    -webkit-mask-image: var(--landing-fade-mask);
+            mask-image: var(--landing-fade-mask);
   }
 
   #auth-container .auth-brand-panel .brand-heartbeat { display: none; }
-
-  /* One scrim, not a stack of local backgrounds: the video, the still and the
-     brand ink all sit under this and move together. */
-  #auth-container .auth-brand-panel::after {
-    content: "";
-    position: absolute;
-    inset: 0;
-    z-index: 1;
-    pointer-events: none;
-    background: var(--landing-scrim);
-  }
 
   /* THE HEAD IS CLIPPED, NOT DRAWN. The Option A lockup on the still now says
      the brand and the strap line on the phone as well, so printing this head over
@@ -1629,7 +1621,7 @@
     right: 1rem;
     bottom: auto;
     z-index: 3;
-    color: var(--landing-ink);
+    color: var(--ind-muted);
     pointer-events: auto;
   }
 
@@ -1648,8 +1640,9 @@
     justify-content: flex-start;
     gap: 0.75rem;
     padding: 1rem 1rem calc(1rem + env(safe-area-inset-bottom, 0px));
+    /* No rule on the seam: the panel above is the same paper, and the film fades
+       into it, so a hard line would be the one thing that re-draws the split. */
     background: var(--ind-panel);
-    border-top: 1px solid var(--ind-rule);
   }
 
   /* The lower fifth is paper, not film: the landing ink is the app's normal ink

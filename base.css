@@ -138,6 +138,10 @@
   --landing-select-edge: rgba(255, 255, 255, 0.42);
   --landing-select-ink: #0b0b0b;
   --landing-mark: url("assets/icon-mark-silver.png");
+  /* The phone's post-film lockup. Option A — the telemetry-grid mark with the
+     INDRONES / PASSBOOK sub-branding — is the artwork the owner asked to keep on
+     screen once the intro ends. Desktop keeps the silver mark. */
+  --landing-mark-mobile: url("assets/brand-lockup-telemetry.png");
 
   /* ── THE PAPER PAIR, BORROWED FROM THE COMPANY'S OWN SITE ──────────────────────
      indrones.com runs its full-width sections alternately pure white and warm
@@ -323,13 +327,13 @@ code, pre, kbd { font-family: var(--font-mono); }
    stays; it now plays in ONE HALF of a screen whose other half is the sign-in,
    usable from the first frame.
 
-   IT IS A COMPACT BRAND HEADER BELOW 1024px AND NOTHING MORE. `.brand-stage` is
-   not drawn there — no art, no video, no download — and the `.landing-head`
-   inside this panel is the brand material in full, exactly as it was before this
-   change. At 1024px and wider the stage appears and the head is visually hidden,
-   because the lockup drawn on the stage already carries the wordmark and the
-   strap line and printing both would say the brand twice. See the media query in
-   RESPONSIVE at the foot of this file.
+   THE STAGE IS DRAWN ON A PHONE NOW, AND THE HEAD IS HIDDEN WITH IT. `.brand-stage`
+   used to be desktop-only; industrial.css's phone block now draws the Option A
+   lockup there as the film's resting still. Because that artwork already carries
+   the wordmark and the strap line, the `.landing-head` is clipped (invisible, still
+   the page's only <h1>) at every width instead of printed a second time over it.
+   See the media query in RESPONSIVE at the foot of this file, and the phone block
+   in industrial.css.
 
    THE GROUND IS ONE WORD AWAY FROM BEING THE OTHER ONE. The panel is always-dark or
    the Indrones paper pair, and both are built so the owner can look at them; the

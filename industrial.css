@@ -1501,13 +1501,14 @@
 
 
 /* ------------------------------------------------------------------------------
-   MOBILE LANDING — THREE FIFTHS FILM, TWO FIFTHS DOORS
+   MOBILE LANDING — THE FILM ABOVE, THE DOORS BELOW, AND NOTHING TO SCROLL
    ------------------------------------------------------------------------------
    Below 1024px the two-column split is dropped for a hard HORIZONTAL split of the
-   screen: the upper 3/5 is the brand — I-PASSBOOK and the intro film — and the
-   lower 2/5 is the landing column. The two rows are 3fr and 2fr of 100dvh, so the
-   proportion holds on every phone height; the lower row scrolls inside itself
-   when the doors and their foot need more than their share.
+   screen: the upper part is the brand — I-PASSBOOK and the intro film — and the
+   lower part is the landing column. The lower column is sized by its CONTENT, so
+   the doors, the acknowledgement, the foot and the credit are always on screen;
+   the film takes whatever height is left and gives way on a short phone. Nothing
+   in the landing scrolls.
 
    The film is light artwork, so a scrim is not decoration: it is what keeps the
    white brand head readable over it. The still is the base layer and the video is
@@ -1526,14 +1527,23 @@
     height: 100dvh;
     min-height: 100dvh;
     padding: 0;
-    overflow: hidden;
+    /* The lower column is sized by its contents and the film takes the rest, so
+       the credit and the version never fall below the fold. `auto` is only a last
+       resort for a viewport too short to hold the form at all (a landscape phone). */
+    overflow-y: auto;
     background: var(--landing-panel-ground);
   }
 
   #auth-container .auth-brand-panel {
     position: relative;
     inset: auto;
-    flex: 3 1 0;
+    /* Not a fixed 3/5: the lower section's real height is subtracted from the
+       screen, so the doors, the acknowledgement, the foot and the credit are all
+       on screen without scrolling. On a tall phone this lands near 3:2; on a short
+       one the film gives way, which is what the owner asked for. The floor is 0 —
+       not 30dvh — because ANY floor is height taken from the form, and on a short
+       phone that is exactly what pushes the credit under the fold. */
+    flex: 1 1 auto;
     z-index: 0;
     width: 100%;
     height: auto;
@@ -1555,11 +1565,18 @@
   }
 
   #auth-container .auth-brand-panel .brand-still {
+    box-sizing: border-box;
     background-color: var(--landing-panel-ground);
-    background-image: var(--landing-mark);
+    /* Option A, not the silver mark: the owner asked for this lockup to stay on
+       screen once the film ends. It is drawn with `contain` inside the content
+       box, and that box starts BELOW the brand head so the two never overlap. */
+    background-image: var(--landing-mark-mobile);
     background-repeat: no-repeat;
-    background-position: center 45%;
-    background-size: min(58vw, 280px) auto;
+    background-position: center center;
+    background-size: contain;
+    background-origin: content-box;
+    background-clip: content-box;
+    padding: max(calc(env(safe-area-inset-top, 0px) + 0.75rem), 3rem) 0.75rem 0.5rem;
   }
 
   #auth-container .auth-brand-panel[data-brand="video"] .brand-video.brand-video {
@@ -1582,25 +1599,33 @@
     background: var(--landing-scrim);
   }
 
+  /* THE HEAD IS CLIPPED, NOT DRAWN. The Option A lockup on the still now says
+     the brand and the strap line on the phone as well, so printing this head over
+     it said everything twice — and, because the artwork is a light square, the
+     text physically crossed it. Clipped, it is invisible and still the page's only
+     <h1>, exactly as it already is at 1024px and wider. The replay control keeps
+     the top band to itself. */
   #auth-container .auth-brand-panel .landing-head {
     position: absolute;
-    top: calc(env(safe-area-inset-top, 0px) + 1.05rem);
-    left: 1.1rem;
-    right: 1.1rem;
-    z-index: 2;
-    margin: 0;
-    display: block;
-    text-align: left;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    border: 0;
     pointer-events: none;
   }
 
-  #auth-container .auth-brand-panel .landing-head .landing-mark { display: none; }
-  #auth-container .auth-brand-panel .landing-brand { color: var(--landing-ink); }
-  #auth-container .auth-brand-panel .landing-full { color: var(--landing-ink-muted); }
-
   #auth-container .auth-brand-panel .brand-replay {
     position: absolute;
-    top: calc(env(safe-area-inset-top, 0px) + 1.05rem);
+    /* A PHONE'S STATUS BAR IS NOT ALWAYS IN THE SAFE-AREA ENV. With
+       viewport-fit=cover, an installed app on a phone that draws edge-to-edge can
+       put the layout viewport under the battery/network strip while reporting a
+       zero inset, which is how the replay control ended up beneath it. The floor
+       of 3rem clears that strip even when the inset says 0; the env() term still
+       adds the notch on a device that does report it. */
+    top: max(calc(env(safe-area-inset-top, 0px) + 0.75rem), 3rem);
     right: 1rem;
     bottom: auto;
     z-index: 3;
@@ -1609,12 +1634,14 @@
   }
 
   #auth-container .auth-main {
-    flex: 2 1 0;
+    /* Content-sized, not a fraction: the film above shrinks to whatever is left,
+       so nothing in this column has to scroll on a normal phone. */
+    flex: 0 0 auto;
     position: relative;
     z-index: 1;
     width: 100%;
     min-height: 0;
-    overflow-y: auto;
+    overflow: visible;
     display: flex;
     flex-direction: column;
     align-items: center;

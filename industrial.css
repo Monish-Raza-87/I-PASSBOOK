@@ -1599,30 +1599,32 @@
     background: var(--landing-scrim);
   }
 
+  /* THE HEAD IS CLIPPED, NOT DRAWN. The Option A lockup on the still now says
+     the brand and the strap line on the phone as well, so printing this head over
+     it said everything twice — and, because the artwork is a light square, the
+     text physically crossed it. Clipped, it is invisible and still the page's only
+     <h1>, exactly as it already is at 1024px and wider. The replay control keeps
+     the top band to itself. */
   #auth-container .auth-brand-panel .landing-head {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    border: 0;
+    pointer-events: none;
+  }
+
+  #auth-container .auth-brand-panel .brand-replay {
     position: absolute;
     /* A PHONE'S STATUS BAR IS NOT ALWAYS IN THE SAFE-AREA ENV. With
        viewport-fit=cover, an installed app on a phone that draws edge-to-edge can
        put the layout viewport under the battery/network strip while reporting a
-       zero inset, which is how the head and the replay control ended up beneath
-       it. The floor of 3rem clears that strip even when the inset says 0; the
-       env() term still adds the notch on a device that does report it. */
-    top: max(calc(env(safe-area-inset-top, 0px) + 0.75rem), 3rem);
-    left: 1.1rem;
-    right: 1.1rem;
-    z-index: 2;
-    margin: 0;
-    display: block;
-    text-align: left;
-    pointer-events: none;
-  }
-
-  #auth-container .auth-brand-panel .landing-head .landing-mark { display: none; }
-  #auth-container .auth-brand-panel .landing-brand { color: var(--landing-ink); }
-  #auth-container .auth-brand-panel .landing-full { color: var(--landing-ink-muted); }
-
-  #auth-container .auth-brand-panel .brand-replay {
-    position: absolute;
+       zero inset, which is how the replay control ended up beneath it. The floor
+       of 3rem clears that strip even when the inset says 0; the env() term still
+       adds the notch on a device that does report it. */
     top: max(calc(env(safe-area-inset-top, 0px) + 0.75rem), 3rem);
     right: 1rem;
     bottom: auto;

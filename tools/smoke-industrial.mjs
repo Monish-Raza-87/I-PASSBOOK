@@ -408,11 +408,13 @@ r.ok('...the film\'s resting still is the Option A telemetry lockup, not the sil
 r.ok('...and that artwork is a real file the deploy serves',
   fs.existsSync(new URL('../assets/brand-lockup-telemetry.png', import.meta.url)) &&
   /'assets\/brand-lockup-telemetry\.png'/.test(deployJs));
-r.ok('...and the head and replay clear the status strip even when the inset reads 0',
-  /\.landing-head \{[^}]*top:\s*max\(calc\(env\(safe-area-inset-top, 0px\) \+ 0\.75rem\), 3rem\)/.test(landingPhone) &&
+r.ok('...and the replay clears the status strip even when the inset reads 0',
   /\.brand-replay \{[^}]*top:\s*max\(calc\(env\(safe-area-inset-top, 0px\) \+ 0\.75rem\), 3rem\)/.test(landingPhone));
+r.ok('...and the phone head is clipped, so it never prints over the lockup',
+  /\.landing-head \{[^}]*overflow:\s*hidden/.test(landingPhone) &&
+  /\.landing-head \{[^}]*clip-path:\s*inset\(50%\)/.test(landingPhone));
 r.ok('the film colours are declared in base.css, and are not --ind-*',
-  landingUsed.size >= 5 && [...landingUsed].every(t => landingTokens.has(t)) &&
+  landingUsed.size >= 4 && [...landingUsed].every(t => landingTokens.has(t)) &&
   landingTokens.size > 0 && ![...landingTokens].some(t => /^--ind-/.test(t)),
   { used: [...landingUsed], declared: [...landingTokens] });
 

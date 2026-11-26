@@ -1678,9 +1678,9 @@ r.ok('...and no splash skip is left beside it, broad prefix and all',
   !/setAttribute\('data-splash'/.test(indexSrc) && !/html\[data-splash/.test(indexSrc));
 r.ok('app.js takes the same road at boot, for the loads pre-paint cannot cover',
   /const handoff = checkHandoff\(\);\s*\n\s*if \(handoff\) \{ finishHandoff\(handoff\); return; \}/.test(appCode));
-r.ok('...and a device already signed in still wins, so a stale fragment cannot hijack it',
-  appCode.indexOf('if (hasStoredSession()) {') <
-  appCode.indexOf('const handoff = checkHandoff();'));
+r.ok('...and a fresh Google return is checked BEFORE the stored session, so it is never ignored',
+  appCode.indexOf('const handoff = checkHandoff();') <
+  appCode.indexOf('if (hasStoredSession()) {'));
 
 // ── Waking the backend before it is needed ────────────────────────────────────
 r.head('the backend is woken before it is needed, never at the moment it is needed');
@@ -2022,6 +2022,27 @@ r.ok('setAllIRs is what asks for the restore, so no boot path can forget it',
                                        appCode.indexOf('function setAllIRs(') + 900)));
 r.ok('sign-out clears the key AND the memory, so the next account starts clean',
   /localStorage\.removeItem\(DOCK_KEY\)/.test(appCode) && /dockIRs\.length = 0/.test(appCode));
+
+// ── The phone's identity strip is a drawer, and the dock is desktop-only ──────
+r.head('the phone folds the identity strip away and never shows the dock');
+r.ok('the IR banner carries a details toggle in the markup',
+  /id="ir-banner-toggle"/.test(indexCode) && /id="ir-banner-actions"/.test(indexCode));
+r.ok('...its control is hidden on desktop and shown on a phone',
+  /\.ir-banner-toggle \{[^}]*display:\s*none/.test(viewsCode) &&
+  /@media \(max-width: 1023px\) \{[\s\S]*?\.ir-banner-toggle \{ display:\s*inline-flex; \}/.test(viewsCode));
+r.ok('...and collapsing hides the sub-line, pills and actions',
+  /#ir-banner\.is-collapsed #ir-banner-sub/.test(viewsCode) &&
+  /#ir-banner\.is-collapsed \.banner-pills/.test(viewsCode) &&
+  /#ir-banner\.is-collapsed \.banner-actions/.test(viewsCode));
+r.ok('...applyBannerCollapsed folds it on a phone and leaves desktop open',
+  /function applyBannerCollapsed/.test(appCode) &&
+  /applyBannerCollapsed\(!mqDesktop\.matches\)/.test(appCode));
+r.ok('the dock is hidden on a phone',
+  /@media \(max-width: 1023px\) \{[\s\S]*?#ir-dock \{ display:\s*none !important; \}/.test(componentsCode));
+r.ok('...and a phone tap opens the full ticket instead of a dock tab',
+  /function openDock\(irNumber\) \{[\s\S]{0,260}?if \(!mqDesktop\.matches\) \{ goTicket\(irNumber\); return; \}/.test(appCode));
+r.ok('...and applyDockState refuses to mark the body on a phone',
+  /const on\s*=\s*mqDesktop\.matches && dockIRs\.length > 0/.test(appCode));
 
 // ── The harness itself ────────────────────────────────────────────────────────
 r.head('the stub DOM is faithful enough for these assertions to be able to fail');

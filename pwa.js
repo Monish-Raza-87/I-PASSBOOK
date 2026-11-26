@@ -91,7 +91,9 @@
       'border-radius:14px',
       'background:#171717',
       'color:#f5f5f4',
-      'font:14px/1.35 system-ui, -apple-system, Segoe UI, Roboto, sans-serif',
+      'font-family:inherit',
+      'font-size:14px',
+      'line-height:1.35',
       'box-shadow:0 12px 34px rgba(0,0,0,.28)'
     ].join(';'));
 
@@ -118,7 +120,9 @@
       'padding:8px 14px',
       'background:#ffd54a',
       'color:#171717',
-      'font:600 13px system-ui, -apple-system, Segoe UI, Roboto, sans-serif',
+      'font-family:inherit',
+      'font-size:13px',
+      'font-weight:600',
       'cursor:pointer',
       'white-space:nowrap'
     ].join(';'), function () {
@@ -143,7 +147,9 @@
       'border:0',
       'background:transparent',
       'color:#cfcfcb',
-      'font:20px/1 system-ui, sans-serif',
+      'font-family:inherit',
+      'font-size:20px',
+      'line-height:1',
       'cursor:pointer',
       'padding:2px 4px'
     ].join(';'), function () {

@@ -195,6 +195,21 @@
   -webkit-tap-highlight-color: transparent;
 }
 
+/* FORM CONTROLS DO NOT INHERIT THE PAGE FONT BY DEFAULT. Each engine gives
+   button, input, select and textarea its own system face, which is why a control
+   can look like a different typeface from the label beside it. This is the one
+   place the theme font is put onto them; component rules then choose sizes and
+   weights only. Anything that genuinely wants mono (code boxes, IR numbers) still
+   names --font-mono with a more specific selector. */
+button,
+input,
+select,
+textarea,
+optgroup,
+option {
+  font-family: inherit;
+}
+
 html {
   scroll-behavior: smooth;
   /* Frappe sets no color-scheme; we do, because this app has far more

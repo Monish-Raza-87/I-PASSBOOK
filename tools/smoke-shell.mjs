@@ -380,14 +380,15 @@ ok('app.js asks it once, through hasStoredSession()',
   /function hasStoredSession\(\)/.test(appJs) &&
   /localStorage\.getItem\(USER_KEY\) && localStorage\.getItem\(SESSION_KEY\)/.test(appJs));
 // ...and the boot path consults THAT predicate, not a second copy of the condition.
-// It returns before checkHandoff() and before warmBackend(): a device that is already
-// signed in must not pay a backend wake-up for a sign-in screen it will never see.
+// A fresh Google return is checked FIRST — it is newer than any stored token — and
+// only past it does the stored-session road run, before warmBackend(): a device that
+// is already signed in must not pay a backend wake-up for a sign-in screen it never sees.
 ok('the boot path leaves through the same predicate',
   /if \(hasStoredSession\(\)\) \{ routeBoot\(\); return; \}/.test(appJs),
   (appJs.match(/[^\n]*hasStoredSession\(\)[^\n]*/) || [''])[0]);
-ok('...before the handoff is even looked for, and before the backend is woken',
-  appJs.indexOf('if (hasStoredSession()) {') < appJs.indexOf('const handoff = checkHandoff();') &&
-  appJs.indexOf('const handoff = checkHandoff();') < appJs.indexOf('warmBackend();'));
+ok('...after a Google handoff is checked, and before the backend is woken',
+  appJs.indexOf('const handoff = checkHandoff();') < appJs.indexOf('if (hasStoredSession()) {') &&
+  appJs.indexOf('if (hasStoredSession()) {') < appJs.indexOf('warmBackend();'));
 // The old once-per-device flag is gone, not merely unused: a leftover write would
 // keep working and quietly make the intro once-per-device again for anyone whose
 // key it set, which is the bug the owner asked to have removed.
@@ -1497,11 +1498,11 @@ head('the landing page offers two doors, stacked, each of them collapsible');
   // adjacent."* So it is a <div> now: the Help & FAQ link, and the language picker pulled
   // up out of a sibling line of its own so the two sit beside each other.
   const footHtml = html.slice(footAt, html.indexOf('</div>', html.indexOf('id="lang-select"')) + 6);
-  ok('the Help & FAQ and the language picker are one common foot, below both doors',
+  ok('the language picker and the WhatsApp corner are one common foot, below both doors',
     footAt > doorsEnd &&
-    /<div class="landing-foot">[\s\S]*?id="auth-faq-link"[\s\S]*?id="lang-select"/.test(html) &&
-    !/auth-faq-link|lang-select/.test(custCard) &&
-    !/auth-faq-link|lang-select/.test(empCard));
+    /<div class="landing-foot">[\s\S]*?id="lang-select"[\s\S]*?id="whatsapp-btn"/.test(html) &&
+    !/lang-select/.test(custCard) &&
+    !/lang-select/.test(empCard));
   ok('...and it is a centred line, not a card of its own',
     /\.landing-foot \{[\s\S]*?justify-content:\s*center/.test(baseCss) &&
     /\.landing-foot \{[\s\S]*?display:\s*flex/.test(baseCss));
@@ -1511,9 +1512,11 @@ head('the landing page offers two doors, stacked, each of them collapsible');
   // not signed in yet; the owner's words were "this element is for customers after loging
   // in". `wireCustomerDoor()` and smoke-door-faq still resolve the id, so moving the button
   // was the whole change — nothing was deleted and no feature was orphaned.
-  ok('...and "Report a problem" is off the sign-in screen entirely',
+  // The Help & FAQ link was removed from this foot at the owner's request; the FAQ is a
+  // signed-in pane now, reached from the sidebar, not a sign-in-screen link.
+  ok('...and "Report a problem" and Help & FAQ are off the sign-in screen entirely',
     !/customer-door-open/.test(footHtml) &&
-    footHtml.indexOf('auth-faq-link') > -1);
+    !/auth-faq-link/.test(footHtml));
   ok('...because it moved behind the sign-in, still hidden until a form is configured',
     /<button type="button" class="nav-item" id="customer-door-open" style="display:none"/.test(html) &&
     /getElementById\('customer-door-open'\)/.test(appCode));
@@ -1560,10 +1563,10 @@ head('the landing page offers two doors, stacked, each of them collapsible');
   // ON A PHONE THE PILL IS A DISC. 165px of fixed furniture landed across the
   // Help & FAQ line and the credit; the markup note always said the phone gets
   // the glyph alone, and this is the rule that finally does it.
-  ok('...and on a phone it is the mark alone, in the foot row beside Help & FAQ',
+  ok('...and on a phone it is the mark alone, in the foot row beside the language picker',
     /@media \(max-width: 639px\) \{[\s\S]*?\.wa-label \{ display: none; \}/.test(baseCss) &&
     /@media \(max-width: 639px\) \{[\s\S]*?\.wa-glyph \{ width: 46px; height: 46px; \}/.test(baseCss) &&
-    /<div class="landing-foot">[\s\S]*?id="auth-faq-link"[\s\S]*?id="lang-select"[\s\S]*?id="whatsapp-btn"/.test(html));
+    /<div class="landing-foot">[\s\S]*?id="lang-select"[\s\S]*?id="whatsapp-btn"/.test(html));
 }
 
 // ── The two halves of one ground ────────────────────────────────────────────────

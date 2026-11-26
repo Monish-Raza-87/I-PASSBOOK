@@ -119,6 +119,13 @@
       // isHandoffReturn()).
       if ((location.hash || '').indexOf('#sso=') === 0) {
         document.documentElement.setAttribute('data-sso', 'wait');
+        // Persist the code BEFORE the first paint. A mobile browser or a standalone
+        // app can hand the return to a fresh context that loses the fragment on a
+        // reload; checkHandoff() already reads this key, so writing it here is what
+        // makes that recovery cover the case it was added for.
+        try {
+          sessionStorage.setItem('pending_sso_code', decodeURIComponent(location.hash.slice(5)));
+        } catch (e) { /* storage blocked */ }
       }
     })();
   </script>
@@ -683,7 +690,6 @@
            the signed-in nav beside Help & FAQ — see #nav-report in the sidebar. A modal
            with no trigger is dead code that reads as a feature. -->
       <div class="landing-foot">
-        <a class="link-btn" id="auth-faq-link" href="faq.html" data-i18n="door.faq">Help &amp; FAQ</a>
         <div class="landing-lang">
           <select id="lang-select" aria-label="Language" data-i18n-aria="landing.language"></select>
         </div>
@@ -702,7 +708,7 @@
 
              IT LIVES IN THE FOOT ROW so the desktop's fixed pill and the phone's 46px
              disc are the same element: fixed takes it out of this row on a desktop,
-             static leaves it beside Help & FAQ and the language picker on a phone. -->
+             static leaves it beside the language picker on a phone. -->
         <a class="wa-corner" id="whatsapp-btn" href="#" target="_blank" rel="noopener noreferrer"
            style="display:none" data-i18n-aria="door.whatsapp" data-i18n-title="door.whatsapp">
           <span class="wa-label" data-i18n="door.whatsappCta">Get in touch</span>
@@ -1137,9 +1143,18 @@
             <div class="banner-main">
               <div id="ir-banner-title"></div>
               <div id="ir-banner-sub"></div>
+              <!-- On a phone the identity strip is paperwork above the section the
+                   person actually opened. This control collapses that paperwork to
+                   the IR number alone; desktop hides the control and the strip is
+                   always open. See #ir-banner.is-collapsed in views.css. -->
+              <button type="button" class="ir-banner-toggle" id="ir-banner-toggle"
+                      aria-expanded="true" aria-controls="ir-banner-sub ir-banner-pills ir-banner-actions">
+                <span class="ir-banner-toggle-text">Show details</span>
+                <span class="ir-banner-chevron" aria-hidden="true"></span>
+              </button>
             </div>
             <div class="banner-pills" id="ir-banner-pills"></div>
-            <div class="banner-actions">
+            <div class="banner-actions" id="ir-banner-actions">
               <button type="button" id="ir-triage-btn" class="btn-ghost" onclick="openTriageModal()" title="Assign, prioritise and categorise this IR"><span class="btn-icon" aria-hidden="true"></span>Allot CAPS</button>
               <button type="button" id="ir-nudge-btn" class="btn-ghost" title="All comments on this IR / tag a teammate"><span class="btn-icon" aria-hidden="true"></span>Comments<span class="comment-count" style="display:none">0</span></button>
               <button type="button" id="ir-history-btn" class="btn-ghost" title="Audit trail / edit history for this IR"><span class="btn-icon" aria-hidden="true"></span>History</button>

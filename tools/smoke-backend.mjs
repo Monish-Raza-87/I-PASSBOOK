@@ -2562,8 +2562,9 @@ r.ok('asDate is the one place a stored value becomes a Date',
   /instanceof Date/.test(ad) && /new Date\(n\)/.test(ad), ad.slice(0, 300));
 r.ok('and an unreadable value answers null rather than an Invalid Date',
   /isNaN\(d\.getTime\(\)\) \? null : d/.test(ad), (ad.match(/[^\n]*isNaN[^\n]*/) || [''])[0]);
-r.ok('session expiry is stored as epoch ms at mint',
-  /expiresAt:\s*now \+ CONFIG\.SESSION_HOURS \* 60 \* 60 \* 1000/.test(fnBody('mintSession')),
+r.ok('session expiry is stored as epoch ms at mint, with the mobile lifetime for the app',
+  /var hours\s*=\s*persistent \? CONFIG\.SESSION_HOURS_MOBILE : CONFIG\.SESSION_HOURS/.test(fnBody('mintSession')) &&
+  /expiresAt:\s*now \+ hours \* 60 \* 60 \* 1000/.test(fnBody('mintSession')),
   (fnBody('mintSession').match(/[^\n]*expiresAt[^\n]*/) || [''])[0]);
 r.ok('and read back through asDate, never compared as a string',
   /asDate\(s\.expiresAt\)/.test(ls) && /asDate\(found\.expiresAt\)/.test(src) &&
@@ -2614,9 +2615,33 @@ r.ok('mintSession retires every other live token of the same email',
   /s\.revokedAt = now/.test(msBody),
   msBody.slice(msBody.indexOf('Object.keys(store.tokens)'), msBody.indexOf('Object.keys(store.tokens)') + 260));
 r.ok('...marked with revokedAt (not deleted), inside the mint\'s own lock',
-  msBody.indexOf('withRowLockOrThrow') < 60 &&
+  msBody.indexOf('withRowLockOrThrow') > 0 &&
+  msBody.indexOf('withRowLockOrThrow') < msBody.indexOf('s.revokedAt = now') &&
   msBody.indexOf('s.revokedAt = now') < msBody.indexOf('writeJsonLocked'),
   { lock: msBody.indexOf('withRowLockOrThrow'), retire: msBody.indexOf('s.revokedAt = now'), write: msBody.indexOf('writeJsonLocked') });
+r.ok('...but a browser sign-in leaves an installed-app token alive',
+  /if \(s\.persistent && !persistent\) return;/.test(msBody));
+r.ok('...and a persistent app token stores its 100-year lifetime',
+  /persistent: persistent/.test(msBody) && /SESSION_HOURS_MOBILE/.test(msBody));
+
+// Every door forwards the flag, so a new hire's first password change, a phone
+// quick-unlock and the Google door all mint the same long-lived app session.
+r.head('every door forwards the mobile-persistent flag');
+r.ok('the password door forwards it',
+  /mintSession\(email, params\.persistent\)/.test(fnBody('doLoginPassword')));
+r.ok('device unlock forwards it',
+  /mintSession\(email, params\.persistent\)/.test(fnBody('doDeviceUnlock')));
+r.ok('changePassword forwards it',
+  /mintSession\(email, params\.persistent\)/.test(fnBody('changePassword')));
+r.ok('passwordless takes and forwards it',
+  /function passwordlessLogin\(email, suppliedCode, device, version, wantResend, persistent\)/.test(src) &&
+  /mintSession\(email, persistent\)/.test(fnBody('passwordlessLogin')) &&
+  /passwordlessLogin\([^)]*params\.persistent\)/.test(fnBody('doLoginPassword')));
+r.ok('the Google exchange forwards it into mintGoogleSession',
+  /function mintGoogleSession\(email, device, version, persistent\)/.test(src) &&
+  /mintGoogleSession\(res\.email, params\.device, params\.version, params\.persistent\)/.test(fnBody('doGoogleExchange')));
+r.ok('prune drops a revoked token after the 7-day tombstone window',
+  /revoked && revoked\.getTime\(\) < cutoff/.test(fnBody('pruneSessionsIn')));
 r.ok('and there is still no lastSeenAt — the expiry stays absolute',
   !/lastSeenAt/.test(msBody));
 
@@ -3257,12 +3282,12 @@ const gmint = fnBody('mintGoogleSession');
 // one mint — the same last-login stamp, the same `google sso · <device>` line, the
 // same payload — and half two calls it rather than repeating it.
 r.ok('the exchange mints through mintGoogleSession, not by hand',
-  /mintGoogleSession\(res\.email, params\.device, params\.version\)/.test(gexch) && !/\bmintSession\(/.test(gexch),
+  /mintGoogleSession\(res\.email, params\.device, params\.version, params\.persistent\)/.test(gexch) && !/\bmintSession\(/.test(gexch),
   (gexch.match(/[^\n]*mintGoogleSession[^\n]*/) || [''])[0]);
 r.ok('a bad code returns the refusal as-is, with no email attached to it',
   /if \(res\.error\) return res\.error;/.test(gexch) && /res\.email/.test(gexch));
 r.ok('the mint returns the same payload shape as the password door',
-  /\bmintSession\(email\)/.test(gmint) &&
+  /\bmintSession\(email,\s*persistent\)/.test(gmint) &&
   /sessionToken: token/.test(gmint) && /access: getMyAccess\(email\)/.test(gmint),
   (gmint.match(/[^\n]*sessionToken[^\n]*/) || [''])[0]);
 // The stamp is now a shared helper rather than a copied block, which is a STRONGER

@@ -32,7 +32,7 @@
     --radius: 10px;
     --radius-lg: 16px;
     --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
-    --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    --sans: 'Inter Variable', 'Inter', system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
     color-scheme: light;
   }
   @media (prefers-color-scheme: dark) {
@@ -566,7 +566,7 @@
     --radius: 0px;
     --radius-lg: 0px;
     --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
-    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", "Noto Sans", Arial, sans-serif;
+    --sans: 'Inter Variable', 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", "Noto Sans", Arial, sans-serif;
     --glass-fill: #ffffff;
     --glass-edge: transparent;
     --glass-blur: none;
@@ -1622,7 +1622,7 @@
   }
   .fleet-card.fleet-visual span { font-size: 12.5px; }
 /* ------------------------------------------------------------------------------
-   CUSTOMER HEADER AND TYPE — ONE VOICE FOR WORDS, MONO FOR NUMBERS
+   CUSTOMER HEADER AND TYPE ï¿½ ONE VOICE FOR WORDS, MONO FOR NUMBERS
    ------------------------------------------------------------------------------
    The portal's industrial skin uses a monospace face for almost every small
    label. That is right for an IR number or a serial, and wrong for a menu the

@@ -1626,3 +1626,12 @@ body.has-dock #toast.show { transform: translateX(-50%) translateY(0); }
   font-family: var(--font-mono); font-size: 10px; letter-spacing: .08em;
   color: var(--ind-muted); min-width: 38px; text-align: right;
 }
+/* -- The multi-ticket dock is a DESKTOP tool ---------------------------------
+   The owner, 2026-11-26: on a phone the strip eats the screen, the sheet is a
+   second window over a window, and there is no room to work several tickets at
+   once anyway. Clicking an IR on a phone goes straight to the full section
+   screen (openDock's mobile branch), so the dock never opens here. */
+@media (max-width: 1023px) {
+  #ir-dock { display: none !important; }
+}
+

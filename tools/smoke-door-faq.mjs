@@ -290,14 +290,21 @@ ok('...and no javascript: link', !/javascript:/i.test(faqCode), 'js href scan');
 // taps it, and on this page it is the point — a person who landed on the FAQ and
 // nothing else still needs a way to report a fault. What must not appear is
 // anything the page FETCHES by itself: a script, a stylesheet, an image, a frame.
+// The theme font is the one deliberate exception — the page must wear the app's
+// face — and the stack still falls back to the system font if it cannot load.
+const isFontHost = a => /fonts\.(?:googleapis|gstatic)\.com/i.test(a);
 const fetched = (faqCode.match(/<(script|link|img|iframe|source|video|audio)\b[^>]*/gi) || [])
   .flatMap(tag => (tag.match(/(?:src|href)\s*=\s*"([^"]*)"/gi) || []))
-  .filter(a => /=\s*"https?:\/\//i.test(a));
-ok('...and it FETCHES nothing from any third party',
+  .filter(a => /=\s*"https?:\/\//i.test(a) && !isFontHost(a));
+ok('...and it FETCHES nothing from any third party except the theme font',
   fetched.length === 0, fetched);
+ok('...and it does load the theme font, so it is not the one page in another face',
+  /fonts\.googleapis\.com\/css2\?family=Inter/.test(faqHtml) &&
+  /--font-sans:\s*'Inter Variable', 'Inter'/.test(faqHtml), 'theme font');
 ok('...and the only outside link on it is the form itself, as a plain navigation',
   (() => {
-    const ext = (faqCode.match(/href="(https?:\/\/[^"]+)"/g) || []).map(s => s.slice(6, -1));
+    const ext = (faqCode.match(/href="(https?:\/\/[^"]+)"/g) || []).map(s => s.slice(6, -1))
+      .filter(u => !isFontHost(u));
     return urlConst === '' ? ext.length === 0 : (ext.length === 1 && ext[0] === urlConst);
   })(), (faqCode.match(/href="(https?:\/\/[^"]+)"/g) || []));
 ok('...and that link opens in a new tab, so the FAQ is never navigated away from',
@@ -437,15 +444,18 @@ ok('...and it no longer describes a frame that does not exist',
 // ── Where the page is reachable from ─────────────────────────────────────────
 head('the FAQ is reachable, and it ships');
 
-ok('the sign-in screen links to it', /id="auth-faq-link"[^>]*href="faq\.html"/.test(indexCode),
-  'sign-in link');
-ok('...and it is NOT hidden with the Report button — the FAQ needs no URL to exist',
-  /id="auth-faq-link"[^>]*href="faq\.html"/.test(indexCode) &&
-  !/id="auth-faq-link"[^>]*style="display:none"/.test(indexCode), 'faq link visibility');
+// The owner asked for the Help & FAQ link to come off the employee sign-in footer.
+// The page is still reachable from the signed-in sidebar (#nav-faq), which routes to
+// the app's own FAQ pane; faq.html itself remains the standalone fallback document.
+ok('the sign-in screen no longer carries a Help & FAQ link',
+  !/id="auth-faq-link"/.test(indexCode), 'sign-in link removed');
+ok('...and the signed-in sidebar still routes to Help & FAQ',
+  /id="nav-faq"[^>]*href="#\/faq"/.test(indexCode) && /id="faq-view"/.test(indexCode),
+  'in-app FAQ route');
 // Counted in base.css, not components.css: the landing page's own rules all live in
 // base.css with the rest of the landing block, and `.landing-foot` has to be declared
 // exactly once or a second declaration is a second, silently competing layout.
-ok('...and both entries sit on the same quiet line, styled',
+ok('...and the foot keeps one quiet line, styled',
   (baseCss.match(/\.landing-foot\s*\{/g) || []).length === 1,
   (baseCss.match(/\.landing-foot\s*\{/g) || []).length);
 ok('the FAQ is in the service worker SHELL, so it opens with no signal',
@@ -468,9 +478,9 @@ ok('...and it is a ROUTE now, not a link out to the standalone page',
 ok('...and its glyph comes from the ONE icon set, not a literal <svg> in the markup',
   /#nav-faq \.nav-icon/.test(appCode) && /\n  help:\s+'<circle/.test(appCode) &&
   !/id="nav-faq"[\s\S]{0,200}<svg/.test(indexCode), 'icon wiring');
-ok('...and its label is its own key, not shared with the sign-in card',
-  /'nav\.help':/.test(i18nJs) && /'door\.faq':/.test(i18nJs),
-  'separate keys');
+ok('...and its label is the sidebar key alone, now that the sign-in card link is gone',
+  /'nav\.help':/.test(i18nJs) && !/'door\.faq':/.test(i18nJs),
+  'sidebar key only');
 
 // ── The FAQ inside the app ────────────────────────────────────────────────────
 //

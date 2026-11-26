@@ -340,6 +340,13 @@ r.ok('...and they are the LED, its dot, the avatar and the role chip',
 // literal. Checked against base.css rather than trusted.
 r.ok('...and base.css really does round .door-role with a literal, not a token',
   /\.door-role\s*\{[^}]*border-radius:\s*999px/.test(base));
+r.ok('the door labels wear the theme sans, not the mono data face',
+  /#auth-container \.door-role \{[^}]*font-family:\s*var\(--font-sans\)/.test(css));
+r.ok('...and the two action buttons that were mono are back on the sans face',
+  /#code-view \.code-resend \.btn \{[^}]*font-family:\s*var\(--font-sans\)/.test(css) &&
+  /#detail-view \.btn-na-section \{[^}]*font-family:\s*var\(--font-sans\)/.test(css));
+r.ok('form controls inherit the page font instead of the UA face',
+  /button,\s*input,\s*select,\s*textarea,\s*optgroup,\s*option \{[^}]*font-family:\s*inherit/.test(base));
 
 // ── 7. The phone rules that are bug fixes, not look ──────────────────────────
 r.head('the search field stops iOS zooming the page, and no phone rule shrinks type');

@@ -479,7 +479,7 @@
    Left as a pill it would be the only curve on the doors. */
 #auth-container .door-role {
   border-radius: 0;
-  font-family: var(--font-mono);
+  font-family: var(--font-sans);
   font-size: var(--text-2xs);
   font-weight: var(--weight-semibold);
   letter-spacing: 0.2em;
@@ -1322,7 +1322,7 @@
   border: 1px solid var(--ind-line);
   background: var(--ind-panel);
   color: var(--ink-gray-9);
-  font-family: var(--font-mono);
+  font-family: var(--font-sans);
   font-size: var(--text-2xs);
   font-weight: var(--weight-medium);
   letter-spacing: 0.1em;
@@ -1366,7 +1366,7 @@
   border: 1px solid var(--ind-line);
   background: var(--ind-panel);
   color: var(--ink-gray-9);
-  font-family: var(--font-mono);
+  font-family: var(--font-sans);
   font-size: var(--text-2xs);
   letter-spacing: 0.1em;
   text-transform: uppercase;

@@ -375,4 +375,20 @@ r.ok('an unrecognised browser says so instead of guessing',
 r.ok('and the label never carries a version number or a raw UA',
   !/\d+\.\d+/.test(fieldOf(signinForm, 'device') || ''), fieldOf(signinForm, 'device'));
 
+// ── The installed handset keeps its session ──────────────────────────────────
+// The owner, 2026-11-26: the app stays signed in until the person signs out. The
+// client's half is the predicate plus the flag; the backend's half is the 100-year
+// lifetime and the browser-does-not-retire-it rule (smoke-backend).
+r.head('the installed handset asks for a persistent session');
+r.ok('the predicate is standalone/installed AND hand-sized',
+  /function isInstalledMobileApp\(\)/.test(appJs) &&
+  /display-mode: standalone/.test(appJs) &&
+  /navigator\.standalone === true/.test(appJs) &&
+  /\(pointer: coarse\)/.test(appJs) &&
+  /== 820|<= 820/.test(appJs));
+r.ok('...the password doors carry persistent when it is true',
+  /if \(isInstalledMobileApp\(\)\) fd\.append\('persistent', 'true'\)/.test(appJs));
+r.ok('...and every postAuth door carries it too — unlock, change, Google, customer',
+  /if \(isInstalledMobileApp\(\)\) all\.persistent = 'true'/.test(appJs));
+
 r.finish();

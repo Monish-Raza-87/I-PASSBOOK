@@ -357,6 +357,14 @@ var CONFIG = {
   // people who use the app most.
   SESSION_HOURS: 8.5,
 
+  // The installed mobile app is a different device class: the owner's rule,
+  // 2026-11-26 — "for mobile application, the autologout is not valid ... one
+  // remains logged in as long as they do not logout themself." A browser keeps
+  // SESSION_HOURS above; a session minted for an installed app gets this lifetime
+  // (100 years, i.e. no practical expiry) and is not retired by a later browser
+  // sign-in. Sign Out, password change/reset and a disabled account still revoke it.
+  SESSION_HOURS_MOBILE: 24 * 365 * 100,
+
   // A temporary password handed over by the admin stops being a credential after
   // this many days, whether or not it was ever used. The forced first-login change
   // handles "it lives forever"; this handles "it was read off a WhatsApp message".
@@ -2692,14 +2700,24 @@ function sessionsTokens() {
   return s.tokens;
 }
 
-// Drop tokens that expired more than 7 days ago. Operates on an already-read
-// store; the caller holds the lock and does the write.
+// Drop tokens that expired more than 7 days ago, and revoked tokens more than 7
+// days after their revocation. Operates on an already-read store; the caller holds
+// the lock and does the write.
+//
+// The revocation cutoff is new with the persistent mobile token: a revoked
+// persistent token has a 100-year expiry, so an expiry-only prune would keep its
+// tombstone (and grow sessions.json) forever.
 function pruneSessionsIn(store) {
   var cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
   var n = 0;
   Object.keys(store.tokens).forEach(function (t) {
-    var exp = asDate(store.tokens[t].expiresAt);
-    if (!exp || exp.getTime() < cutoff) { delete store.tokens[t]; n++; }
+    var rec = store.tokens[t];
+    var exp = asDate(rec.expiresAt);
+    var revoked = asDate(rec.revokedAt);
+    if (!exp || exp.getTime() < cutoff ||
+        (revoked && revoked.getTime() < cutoff)) {
+      delete store.tokens[t]; n++;
+    }
   });
   return n;
 }
@@ -2739,34 +2757,43 @@ function hashPassword(password, salt) {
 // very next request. Throws if the lock cannot be taken — a failure to mint must
 // never be mistaken for a token.
 //
-// One ACTIVE SESSION per account (the owner's "option A", chosen 2026-09-21):
-// minting here retires every OTHER live token of the same email, in the same
-// write. The accepted cost was stated to the owner before the choice: signing in
-// on the phone signs the desktop out. That is the feature, not a bug — it is not
-// to be softened into a warning-with-override or a per-device list without
-// asking. Every door (password, passwordless, Google, quick-unlock) mints through
-// this one function, so the rule holds uniformly with no per-door copy to drift.
-function mintSession(email) {
+// One ACTIVE SESSION per account in a browser (the owner's "option A", chosen
+// 2026-09-21): minting here retires every OTHER live token of the same email, in
+// the same write. The accepted cost was stated before the choice: signing in on
+// the phone signs the desktop out.
+//
+// ⚠ THE INSTALLED MOBILE APP IS THE EXCEPTION, BY THE OWNER'S 2026-11-26 RULE:
+// "for mobile application, the autologout is not valid ... one remains logged in
+// as long as they do not logout themself." A token minted with `persistent` does
+// not expire on the 8.5h clock, and a later BROWSER sign-in does NOT retire it —
+// otherwise the phone would be signed out without the person pressing Sign Out.
+// A persistent sign-in still retires every other token (browser or app), so two
+// phones cannot both persist. Explicit Sign Out, a password change/reset and a
+// disabled account all still revoke it.
+function mintSession(email, persistent) {
+  persistent = (persistent === true || String(persistent).toLowerCase() === 'true');
   return withRowLockOrThrow(function () {
     var store = readJsonLocked('sessions.json');
     if (!store || !store.tokens) store = { tokens: {} };
     var caller = usersKey(email);
     var token  = Utilities.getUuid();
     var now    = Date.now();
+    var hours  = persistent ? CONFIG.SESSION_HOURS_MOBILE : CONFIG.SESSION_HOURS;
     store.tokens[token] = {
       email:      caller,
       createdAt:  now,
-      expiresAt:  now + CONFIG.SESSION_HOURS * 60 * 60 * 1000,
-      revokedAt:  null
+      expiresAt:  now + hours * 60 * 60 * 1000,
+      revokedAt:  null,
+      persistent: persistent
     };
-    // The retirement itself: every other live token of this email dies with the
-    // new one. Revoked-at, never deleted — the audit value of "when was it
-    // replaced" survives (see the revoke contract in revokeSessionsForIn).
+    // The retirement: every other live token of this email dies with the new one,
+    // EXCEPT that a browser sign-in leaves a persistent app token alone.
     Object.keys(store.tokens).forEach(function (t) {
       if (t === token) return;
       var s = store.tokens[t];
       if (s.revokedAt) return;
       if (usersKey(s.email) !== caller) return;
+      if (s.persistent && !persistent) return;
       s.revokedAt = now;
     });
     // There is deliberately NO lastSeenAt. It existed for the sliding expiry, and
@@ -3040,7 +3067,7 @@ function doDeviceUnlock(params) {
     });
   } catch (e) { /* non-fatal */ }
 
-  var sessionToken = mintSession(email);
+  var sessionToken = mintSession(email, params.persistent);
   return { status: 'ok', sessionToken: sessionToken, email: email, access: getMyAccess(email) };
 }
 
@@ -3976,7 +4003,7 @@ function changePassword(params) {
   });
 
   clearFailedLogin(email);
-  var token = mintSession(email);
+  var token = mintSession(email, params.persistent);
   return { status: 'ok', sessionToken: token, email: email, mustChangePassword: false, access: getMyAccess(email) };
 }
 
@@ -4165,7 +4192,7 @@ var PWLESS_GENERIC_STAGE1 =
   'Otherwise no code will arrive — if you were given a temporary password, use ' +
   '"Use password instead" below.';
 
-function passwordlessLogin(email, suppliedCode, device, version, wantResend) {
+function passwordlessLogin(email, suppliedCode, device, version, wantResend, persistent) {
   var locked = lockoutRemaining(email);
   if (locked) return locked;
 
@@ -4247,7 +4274,7 @@ function passwordlessLogin(email, suppliedCode, device, version, wantResend) {
     });
   } catch (e) { /* non-fatal */ }
 
-  var token = mintSession(email);
+  var token = mintSession(email, persistent);
   return { status: 'ok', sessionToken: token, email: email, access: getMyAccess(email) };
 }
 
@@ -4271,7 +4298,7 @@ function doLoginPassword(params) {
   //
   // Everything about which account state is which lives in passwordlessLogin; this
   // split is only "did the caller bring a password".
-  if (!password) return passwordlessLogin(email, supplied, params.device, params.version, params.resend);
+  if (!password) return passwordlessLogin(email, supplied, params.device, params.version, params.resend, params.persistent);
 
   // Lockout check (applies whether or not the account exists — avoids leaking
   // which emails have accounts, and stops password guessing on a shared device).
@@ -4357,7 +4384,7 @@ function doLoginPassword(params) {
     });
   } catch (e) { /* non-fatal */ }
 
-  var token = mintSession(email);
+  var token = mintSession(email, params.persistent);
   return { status: 'ok', sessionToken: token, email: email, access: getMyAccess(email) };
 }
 
@@ -4521,7 +4548,7 @@ function redeemHandoff(code) {
 // throttle. And not clearFailedLogin either — someone fumbling their PASSWORD must
 // not be able to wash that counter away by clicking this button. The counter
 // belongs to the password door, and only the password door moves it.
-function mintGoogleSession(email, device, version) {
+function mintGoogleSession(email, device, version, persistent) {
   // Last-login stamp, best-effort, exactly as the password door records it:
   // failing to record it must never fail a sign-in that is already authenticated.
   try {
@@ -4546,7 +4573,7 @@ function mintGoogleSession(email, device, version) {
     });
   } catch (e) { /* non-fatal */ }
 
-  var token = mintSession(email);
+  var token = mintSession(email, persistent);
   return { status: 'ok', sessionToken: token, email: email, access: getMyAccess(email) };
 }
 
@@ -4830,7 +4857,7 @@ function doGoogleStart() {
 function doGoogleExchange(params) {
   var res = redeemHandoff(params.code);
   if (res.error) return res.error;
-  return mintGoogleSession(res.email, params.device, params.version);
+  return mintGoogleSession(res.email, params.device, params.version, params.persistent);
 }
 
 // POST googleSignIn — REMOVED, and deliberately not kept "for later".

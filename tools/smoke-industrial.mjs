@@ -364,39 +364,44 @@ r.ok('...and the auth buttons are raised, on a phone, to 44px',
   /#auth-container \.btn,[\s\S]{0,80}?height:\s*44px/.test(phoneBlock));
 
 // ── 7a. The phone is a different composition, not a smaller one ───────────────
-// Below 1024px the two-column split is dropped: the brand stage becomes a FIXED,
-// full-viewport field, the doors sit over it, and the film is now the ground the
-// page is read against. The scrim is not decoration — the film is light artwork,
-// and white type on it is only legible because a token paints the darkening.
+// Below 1024px the two-column split becomes a HARD 3:2 horizontal split: the film
+// and the brand head in the upper 3/5, the doors in the lower 2/5. The scrim is not
+// decoration — the film is light artwork, and white type on it is only legible
+// because a token paints the darkening.
 //
-// Those colours live as --landing-* tokens in base.css and not here, because this
-// file is checked for raw colours and colour functions: a `linear-gradient(` typed
-// into industrial.css would be exactly the failure that check exists to stop.
-r.head('the phone turns the film into the field, and the doors stand in front');
+// The lower fifth is paper, not film, which is why the landing ink there is the
+// app's normal ink rather than --landing-ink. An opened door is a full-screen
+// sheet, driven by the one body flag setDoor publishes.
+//
+// Those film colours live as --landing-* tokens in base.css and not here, because
+// this file is checked for raw colours and colour functions: a `linear-gradient(`
+// typed into industrial.css would be exactly the failure that check exists to stop.
+r.head('the phone is a 3:2 split: the film above, the doors below');
 const landingPhone = (css.match(/@media \(max-width: 1023px\)\s*\{([\s\S]*?)\n\}/) || [])[1] || '';
 const landingTokens = new Set([...base.matchAll(/(--landing-[a-zA-Z0-9-]+)\s*:/g)].map(m => m[1]));
 const landingUsed = new Set([...landingPhone.matchAll(/var\(\s*(--landing-[a-zA-Z0-9-]+)/g)].map(m => m[1]));
 
-r.ok('the phone composition is a real 1023px block, the width the split hands over at',
+r.ok('the phone composition is a real 1023px block with a 3fr/2fr screen split',
   landingPhone.length > 0 &&
-  /#auth-container\s*\{[\s\S]{0,200}?flex-direction:\s*column/.test(landingPhone));
-r.ok('...and the brand stage is pinned behind the page rather than stacked above it',
-  /#auth-container \.auth-brand-panel\s*\{[\s\S]{0,240}?position:\s*fixed[\s\S]{0,240}?inset:\s*0/.test(landingPhone));
-r.ok('...with the film cropped to fill it, not letterboxed inside its old square',
+  /\.auth-brand-panel \{[^}]*flex:\s*3 1 0/.test(landingPhone) &&
+  /\.auth-main \{[^}]*flex:\s*2 1 0/.test(landingPhone) &&
+  /#auth-container \{[^}]*height:\s*100dvh/.test(landingPhone));
+r.ok('...the film is the upper fifth, cropped to fill it',
   /\.brand-video\.brand-video\s*\{[^}]*object-fit:\s*cover/.test(landingPhone));
-r.ok('...and one scrim token, not a stack of local washes, keeps the type readable',
+r.ok('...and one scrim token, not a stack of local washes, keeps the brand head readable',
   /#auth-container \.auth-brand-panel::after\s*\{[^}]*background:\s*var\(--landing-scrim\)/.test(landingPhone),
   (landingPhone.match(/\.auth-brand-panel::after\s*\{[^}]*\}/) || [''])[0]);
-r.ok('...and the doors and their head sit in their own layer above it',
-  /\.auth-main\s*\{[\s\S]{0,240}?position:\s*relative[\s\S]{0,240}?z-index:\s*1/.test(landingPhone));
-r.ok('...and they START below the mark, so the logo is never covered',
-  /\.auth-main\s*\{[\s\S]{0,1400}?justify-content:\s*flex-start/.test(landingPhone) &&
-  /\.auth-main\s*\{[\s\S]{0,1600}?padding:\s*calc\(30dvh \+ min\(46\.6vw, 225px\)/.test(landingPhone));
-r.ok('...and the empty column cannot swallow the replay control\'s tap',
-  /\.auth-main\s*\{[\s\S]{0,1800}?pointer-events:\s*none/.test(landingPhone) &&
-  /\.auth-main > \*\s*\{\s*pointer-events:\s*auto/.test(landingPhone));
-r.ok('the landing ink and control colours are declared in base.css, and are not --ind-*',
-  landingUsed.size >= 6 && [...landingUsed].every(t => landingTokens.has(t)) &&
+r.ok('...and the doors are the lower fifth, scrolling inside it on paper',
+  /\.auth-main \{[^}]*overflow-y:\s*auto/.test(landingPhone) &&
+  /\.auth-main \{[^}]*background:\s*var\(--ind-panel\)/.test(landingPhone));
+r.ok('...and an opened door leaves the split for the whole screen',
+  /\.door\[data-open="1"\] \{[^}]*position:\s*fixed[^}]*inset:\s*0/.test(landingPhone) &&
+  /#auth-container:has\(\.door\[data-open="1"\]\) \.auth-main > :not\(\.doors\) \{ display:\s*none; \}/.test(landingPhone) &&
+  /#auth-container:has\(\.door\[data-open="1"\]\) \.door:not\(\[data-open="1"\]\) \{ display:\s*none; \}/.test(landingPhone));
+r.ok('...and the corner chat is a third item in the foot row, not a floating pill',
+  /#auth-container \.wa-corner \{[^}]*position:\s*static/.test(landingPhone));
+r.ok('the film colours are declared in base.css, and are not --ind-*',
+  landingUsed.size >= 5 && [...landingUsed].every(t => landingTokens.has(t)) &&
   landingTokens.size > 0 && ![...landingTokens].some(t => /^--ind-/.test(t)),
   { used: [...landingUsed], declared: [...landingTokens] });
 

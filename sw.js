@@ -21,7 +21,7 @@
 // name from being filled with bodies the browser's HTTP cache had already gone
 // stale on. That combination — a new name AND fresh bodies inside it — is what
 // makes the app's "update available" check honest.
-const CACHE_NAME = 'ipassbook-v153';
+const CACHE_NAME = 'ipassbook-v154';
 const SHELL = [
   './',
   './index.html',

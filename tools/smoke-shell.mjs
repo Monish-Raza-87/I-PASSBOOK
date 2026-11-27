@@ -1199,7 +1199,7 @@ head('the landing page offers two doors, stacked, each of them collapsible');
   // entry screen whether or not this device can use them, so "is there anything below me"
   // and "is this the entry screen" are the same question.
   ok('...and the divider is shown for the whole alternatives block, not for Google alone',
-    /set\('auth-or',\s*firstStep && \(!!CONFIG\.SSO_URL \|\| quickOn\)\)/.test(appCode));
+    /set\('auth-or',\s*firstStep && \(gisOn \|\| !!CONFIG\.SSO_URL \|\| quickOn\)\)/.test(appCode));
   ok('...and it ships hidden, so a JS-off page never shows a lone "or"',
     /<div class="auth-or" id="auth-or" style="display:none">/.test(empForm));
   // ── FOUR ANSWERS TO ONE QUESTION, AND ONE OF THEM IS THE ACCENT ───────────────

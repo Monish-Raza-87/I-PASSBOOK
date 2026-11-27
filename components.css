@@ -1692,3 +1692,9 @@ body.has-dock #toast.show { transform: translateX(-50%) translateY(0); }
   #ir-dock { display: none !important; }
 }
 
+
+/* Google Identity Services renders its own iframe button; keep it centred and at
+   the card's width so it sits where the custom Google button used to. */
+.auth-google-slot { display: flex; justify-content: center; width: 100%; min-height: 44px; }
+.auth-google-slot > div { display: flex; justify-content: center; width: 100%; }
+

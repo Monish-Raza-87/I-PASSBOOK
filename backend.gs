@@ -197,6 +197,14 @@ var CONFIG = {
 
   ALLOWED_DOMAIN: 'indrones.com',
 
+  // Google Identity Services (the modern "Sign in with Google"). The SAME Client ID
+  // must be in app.js's CONFIG.GOOGLE_CLIENT_ID. It is public by design; this copy
+  // exists only so the backend can check the ID token's `aud` (a token minted for
+  // another app must not be accepted). Empty = the new door is off and the app falls
+  // back to the old domain-scoped deployment, if one is configured.
+  GOOGLE_CLIENT_ID: '',
+
+
   // Bump this whenever the action set or a response shape changes. `ping` reports
   // it, so a cached frontend talking to a newer backend (or vice versa) can say so
   // in words a human can act on instead of failing as "Unknown action".
@@ -4427,7 +4435,14 @@ function googleCallerEmail() {
 // Every branch gives the SAME answer the password door gives for the same
 // condition, so someone who tries both doors is never told two different things.
 function googleDoorCheck() {
-  var email = googleCallerEmail();
+  return googleAccountFor(googleCallerEmail());
+}
+
+// The account ladder shared by BOTH Google doors: the old domain-scoped navigation
+// and the new ID-token door below. Returns {error} or {email, user}. Kept in one
+// place so the two doors can never give different answers for the same account.
+function googleAccountFor(rawEmail) {
+  var email = usersKey(rawEmail);
   if (!email) {
     return { error: { status: 'error', message: 'Google did not report an account for this browser. Use your email and password instead.' } };
   }
@@ -4860,6 +4875,59 @@ function doGoogleExchange(params) {
   return mintGoogleSession(res.email, params.device, params.version, params.persistent);
 }
 
+// ── THE GOOGLE ID-TOKEN DOOR (Google Identity Services) ─────────────────────
+// Why this exists: the domain-scoped deployment above reads the browser's DEFAULT
+// Google account, and a phone whose default is a personal account gets Google's own
+// "unable to open the file at present" page before our code runs. GIS gives the
+// person a real account picker; the ID token it returns is verified here, so this
+// door works whatever the browser's default account is.
+//
+// `tokeninfo` is Google's own verifier: it checks the token's signature and returns
+// the claims. We then check aud/iss/email_verified/exp ourselves, because tokeninfo
+// answers correctly for ANY valid Google token, not specifically one minted for us.
+function verifyGoogleIdToken(idToken) {
+  if (!CONFIG.GOOGLE_CLIENT_ID) {
+    return { error: { status: 'error', message: 'Google sign-in is not configured yet.' } };
+  }
+  var token = String(idToken || '').trim();
+  if (!token) return { error: { status: 'error', message: 'Google sign-in did not return a token.' } };
+  var resp;
+  try {
+    resp = UrlFetchApp.fetch('https://oauth2.googleapis.com/tokeninfo?id_token=' +
+      encodeURIComponent(token), { muteHttpExceptions: true });
+  } catch (e) {
+    return { error: { status: 'error', message: 'Could not verify Google sign-in just now — try again.' } };
+  }
+  if (!resp || resp.getResponseCode() !== 200) {
+    return { error: { status: 'error', message: 'Google sign-in could not be verified — try again.' } };
+  }
+  var info;
+  try { info = JSON.parse(resp.getContentText()); } catch (e) { info = null; }
+  if (!info) return { error: { status: 'error', message: 'Google sign-in returned an unreadable answer.' } };
+  if (String(info.aud) !== CONFIG.GOOGLE_CLIENT_ID) {
+    return { error: { status: 'error', message: 'That Google sign-in was issued for a different app.' } };
+  }
+  var iss = String(info.iss || '');
+  if (iss !== 'accounts.google.com' && iss !== 'https://accounts.google.com') {
+    return { error: { status: 'error', message: 'That Google sign-in came from an unexpected issuer.' } };
+  }
+  if (String(info.email_verified) !== 'true') {
+    return { error: { status: 'error', message: 'That Google account\'s email is not verified.' } };
+  }
+  if (info.exp && Number(info.exp) <= Math.floor(Date.now() / 1000)) {
+    return { error: { status: 'error', message: 'That Google sign-in has expired — try again.' } };
+  }
+  return { email: usersKey(info.email) };
+}
+
+function doGoogleIdExchange(params) {
+  var v = verifyGoogleIdToken(params.idToken);
+  if (v.error) return v.error;
+  var c = googleAccountFor(v.email);
+  if (c.error) return c.error;
+  return mintGoogleSession(c.email, params.device, params.version, params.persistent);
+}
+
 // POST googleSignIn — REMOVED, and deliberately not kept "for later".
 //
 // It read the caller's Workspace identity from a POST body, which is unreachable:
@@ -5090,6 +5158,10 @@ function doPost(e) {
       // both in the body, both self-authenticating, both refused uniformly —
       // see doGoogleExchange and doDeviceUnlock.
       googleExchange: function () { return doGoogleExchange(params); },
+      // The modern Google door: a GIS ID token, verified against Google, then the
+      // same account ladder and the same mint. Self-authenticating for the same
+      // reason the handoff code is — the ID token is the credential.
+      googleIdExchange: function () { return doGoogleIdExchange(params); },
       deviceUnlock:   function () { return doDeviceUnlock(params); },
       ping:           function () { return ping(); },
       sessionCheck:   function () { return sessionCheck(e); },

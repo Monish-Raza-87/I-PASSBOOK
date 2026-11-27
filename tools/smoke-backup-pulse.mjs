@@ -180,8 +180,11 @@ r.ok('getBackupHealth is unchanged and still gated on isAdminEmail',
 r.ok('...and it is STILL the one allowed to return the counts and the sheet address',
   /sheetUrl: h\.sheetUrl/.test(code) && /files: h\.files/.test(code));
 
-r.ok('no UrlFetchApp — this added no network call',
-  !/UrlFetchApp/.test(code), (code.match(/[^\n]*UrlFetchApp[^\n]*/) || ['none']));
+r.ok('the only network call is the Google ID-token verifier',
+  (() => {
+    const gv = (code.match(/function verifyGoogleIdToken[\s\S]*?\n\}/) || [''])[0];
+    return (code.match(/UrlFetchApp/g) || []).length === (gv.match(/UrlFetchApp/g) || []).length;
+  })(), (code.match(/[^\n]*UrlFetchApp[^\n]*/) || ['none'])[0]);
 
 // ── 4. The page ────────────────────────────────────────────────────────────────
 r.head('the page that shows it is served, and stays out of the app\'s shell');

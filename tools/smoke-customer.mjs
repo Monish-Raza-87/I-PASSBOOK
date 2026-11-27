@@ -659,9 +659,12 @@ r.ok('the version is at least 8, so a portal can refuse to run against an older 
 r.ok('and the bump carries its reason, not just a number',
   /does not merely lack the feature, it ANSWERS[\s\S]{0,40}?customer's token with the whole repository/.test(backendGs),
   (backendGs.match(/[^\n]*ANSWERS[^\n]*/) || ['none'])[0]);
-r.ok('no UrlFetchApp was added — the invitation is MailApp, not a webhook',
-  !/UrlFetchApp/.test(backendGs.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')),
-  (backendGs.match(/[^\n]*UrlFetchApp[^\n]*/) || ['none'])[0]);
+r.ok('the only UrlFetchApp is the Google ID-token verifier, not a webhook',
+  (() => {
+    const clean = backendGs.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+    const gv = (clean.match(/function verifyGoogleIdToken[\s\S]*?\n\}/) || [''])[0];
+    return (clean.match(/UrlFetchApp/g) || []).length === (gv.match(/UrlFetchApp/g) || []).length;
+  })(), (backendGs.match(/[^\n]*UrlFetchApp[^\n]*/) || ['none'])[0]);
 
 // ── 9. The scope lives where it cannot be self-served ───────────────────────────
 r.head('the scope is a grant, and it sits where grants cannot be written by a customer');

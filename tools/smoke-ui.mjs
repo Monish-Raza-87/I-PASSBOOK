@@ -2064,6 +2064,25 @@ r.ok('the sheet is styled, including a phone bottom-sheet layout',
   /\.quick-offer-modal \{/.test(componentsCode) &&
   /@media \(max-width: 639px\) \{[\s\S]*?\.quick-offer-modal \{ align-items:\s*flex-end/.test(componentsCode));
 
+// ── The modern Google door (Identity Services) ───────────────────────────────
+r.head('the modern Google door renders GIS and posts an ID token');
+r.ok('a CONFIG slot exists for the OAuth client ID',
+  /GOOGLE_CLIENT_ID/.test(appCode));
+r.ok('the GIS client is loaded from Google and rendered into its own slot',
+  /accounts\.google\.com\/gsi\/client/.test(appCode) &&
+  /google\.accounts\.id\.renderButton/.test(appCode) &&
+  /id="auth-google-slot"/.test(indexCode));
+r.ok('...and the picked account\'s credential is posted to the new action',
+  /postAuth\('googleIdExchange'/.test(appCode));
+r.ok('...while the old domain-scoped button stays as the unconfigured fallback',
+  /function submitGoogleSignIn/.test(appCode) &&
+  /firstStep && !gisOn && !!CONFIG\.SSO_URL/.test(appCode));
+r.ok('...and the exchange is an auth call, so no session token is attached to it',
+  /googleExchange\|googleIdExchange\|deviceUnlock/.test(appCode));
+r.ok('...and the slot is styled where the custom button used to sit',
+  /\.auth-google-slot \{[^}]*justify-content:\s*center/.test(componentsCode) &&
+  /\.auth-google-slot \{[^}]*min-height:\s*44px/.test(componentsCode));
+
 // ── The harness itself ────────────────────────────────────────────────────────
 r.head('the stub DOM is faithful enough for these assertions to be able to fail');
 r.ok('classList.toggle remembers, in both the one- and two-argument form',

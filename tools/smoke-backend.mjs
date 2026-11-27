@@ -347,17 +347,16 @@ r.head('the new actions are dispatched');
 // file cannot satisfy this. Keys are unquoted identifiers (`login: function…`).
 //
 // The window is a byte count, not "up to the closing brace", so it is a number that
-// has to grow when the maps do. It went 2600 → 4200 in v8: `inviteCustomer` and
-// `setCustomerCompany` pushed `deviceRevoke`, the last entry, past the old end — and
-// the failure it produced was "deviceRevoke is absent", which reads like the entry had
-// been deleted rather than like the window had moved. If a name reports absent again,
+// has to grow when the maps do. It went 2600 → 4200 in v8 (`inviteCustomer` and
+// `setCustomerCompany` pushed `deviceRevoke` past the old end), and 4200 → 5200 when
+// the `googleIdExchange` pre-auth entry was added. If a name reports absent again,
 // check this number before you go looking for a missing line.
-const dispatchers = [code.slice(doPostAt, doPostAt + 4200), code.slice(doGetAt, doGetAt + 4200)].join('\n');
+const dispatchers = [code.slice(doPostAt, doPostAt + 5200), code.slice(doGetAt, doGetAt + 5200)].join('\n');
 ['ping', 'sessionCheck', 'login', 'logout', 'changePassword', 'forgotPassword',
  'resetPassword', 'getMyAccess', 'getMyCustomer', 'listUsers', 'listTeam',
  'createUser', 'bulkCreateUsers', 'inviteCustomer', 'setCustomerCompany',
  'resetUserPassword', 'setUserStatus', 'saveDepartment', 'deleteDepartment',
- 'setUserDepartments', 'purgeUsers', 'googleExchange', 'deviceUnlock',
+ 'setUserDepartments', 'purgeUsers', 'googleExchange', 'googleIdExchange', 'deviceUnlock',
  'deviceRegister', 'deviceRevoke']
   .forEach(a => r.ok('"' + a + '" is dispatched',
     new RegExp('\\b' + a + '\\s*:').test(dispatchers),
@@ -386,8 +385,8 @@ r.ok('a DISABLED account is left out — a notification nobody can act on',
 r.ok('a CUSTOMER account is left out — a customer is not a colleague',
   /customers/.test(lt), (lt.match(/[^\n]*customers[^\n]*/) || ['absent'])[0]);
 r.ok('...and it sits BEHIND the auth gate, never in the preAuth map',
-  code.slice(doGetAt, doGetAt + 4200).indexOf('listTeam') >
-  code.slice(doGetAt, doGetAt + 4200).indexOf('requireAuth('));
+  code.slice(doGetAt, doGetAt + 5200).indexOf('listTeam') >
+  code.slice(doGetAt, doGetAt + 5200).indexOf('requireAuth('));
 
 // googleStart is dispatched from doGet as a BRANCH, not a map entry, and that is
 // deliberate: it must return an HtmlOutput (a redirect page), so it can never go
@@ -702,8 +701,10 @@ r.ok('neither door tells an attacker which address exists',
 // ── Mail and sessions ─────────────────────────────────────────────────────────
 r.head('mail uses the already-granted scope');
 r.ok('MailApp.sendEmail is used', /MailApp\.sendEmail/.test(code));
-r.ok('no UrlFetchApp anywhere (it broke Google Sign-In once)',
-  !/UrlFetchApp/.test(code), (code.match(/UrlFetchApp[^\n]*/) || [''])[0]);
+r.ok('the only network call is the ID-token verifier — mail still uses MailApp',
+  (code.match(/UrlFetchApp/g) || []).length ===
+  (fnBody('verifyGoogleIdToken').match(/UrlFetchApp/g) || []).length,
+  (code.match(/UrlFetchApp[^\n]*/) || [''])[0]);
 r.ok('the recipient guard exists and reads the store, not the source',
   /isMailRecipientAllowed/.test(code) && /storeIds\(\)\.externalEmails/.test(code));
 
@@ -3111,8 +3112,10 @@ r.ok('a Session call that fails is an empty identity, not an exception',
   /try\s*{/.test(gcall) && /catch/.test(gcall) && /return '';/.test(gcall));
 
 r.head('the refusal ladder is one function, so both halves cannot disagree');
-const gdoor = fnBody('googleDoorCheck');
-r.ok('the door goes through it', /googleDoorCheck\(\)/.test(fnBody('doGoogleStart')));
+const gdoor = fnBody('googleAccountFor');
+r.ok('both Google doors go through it',
+  /googleAccountFor\(googleCallerEmail\(\)\)/.test(fnBody('googleDoorCheck')) &&
+  /googleAccountFor\(v\.email\)/.test(fnBody('doGoogleIdExchange')));
 r.ok('an empty identity is refused', /if \(!email\)/.test(gdoor));
 r.ok('a non-domain address is refused against CONFIG.ALLOWED_DOMAIN',
   /CONFIG\.ALLOWED_DOMAIN/.test(gdoor), (gdoor.match(/[^\n]*ALLOWED_DOMAIN[^\n]*/) || [''])[0]);
@@ -3302,6 +3305,26 @@ r.ok('the sign-in line records the door it came through',
   /signinAuditLine\(email, null, device, signinAt, 'google'\)/.test(gmint),
   (gmint.match(/[^\n]*signinAuditLine[^\n]*/) || [''])[0]);
 
+// ── The ID-token door (Google Identity Services) ──────────────────────────────
+// The domain-scoped door only sees the browser's DEFAULT account; this one takes a
+// GIS ID token, so a phone whose default is a personal account can still sign in.
+r.head('the ID-token Google door verifies before it mints');
+const gib = fnBody('doGoogleIdExchange');
+const git = fnBody('verifyGoogleIdToken');
+r.ok('it is routed pre-auth, beside the handoff door',
+  /googleIdExchange: function \(\) \{ return doGoogleIdExchange\(params\); \}/.test(src));
+r.ok('...and verifies the token against Google\'s own tokeninfo endpoint',
+  /oauth2\.googleapis\.com\/tokeninfo\?id_token=/.test(git) && /UrlFetchApp\.fetch/.test(git));
+r.ok('...checking aud, issuer, verified email and expiry itself',
+  /info\.aud/.test(git) && /info\.iss/.test(git) && /info\.email_verified/.test(git) && /info\.exp/.test(git));
+r.ok('...then the SAME account ladder as the other Google door',
+  /googleAccountFor\(v\.email\)/.test(gib) &&
+  /return googleAccountFor\(googleCallerEmail\(\)\);/.test(fnBody('googleDoorCheck')));
+r.ok('...and the SAME mint, carrying the persistent app flag',
+  /mintGoogleSession\(c\.email, params\.device, params\.version, params\.persistent\)/.test(gib));
+r.ok('the client ID is a CONFIG value, so verification can check the audience',
+  /GOOGLE_CLIENT_ID:\s*''/.test(src));
+
 r.head('a Google handoff is invisible to the emailed-code throttle');
 // A handoff is not a mailed six-digit code, and counting it would let three Google
 // sign-ins spend a colleague's budget for the reset that is the only way back into a
@@ -3318,12 +3341,17 @@ r.ok('the door wordings are method labels in one map — google sso, and the unl
   /'google sso'/.test(sal) && /methodNotes/.test(sal) && /'fingerprint unlock'/.test(sal) &&
   !/code .*google/.test(sal));
 
-r.head('the Google door needs no network and no new permission');
-// The one thing that already broke Google Sign-In once, and the reason this design
-// was chosen over an OAuth Client ID: nothing here calls out.
-r.ok('no UrlFetchApp anywhere — still true after adding this door',
-  !/UrlFetchApp/.test(code), (code.match(/[^\n]*UrlFetchApp[^\n]*/) || ['none']));
-r.ok('it needs no OAuth scope of its own — Session is core',
+r.head('the new Google door is the one place that calls out, and only to verify a token');
+// This REPLACES the old "no UrlFetchApp anywhere" rule, deliberately and by the
+// owner's request (2026-11-26): the domain-scoped door cannot serve a phone whose
+// default Google account is a personal one, so the ID-token door was chosen instead.
+// It needs the script's own external-request scope; that is a deployment step, not a
+// reason to leave the phone unable to sign in.
+r.ok('UrlFetchApp appears only inside verifyGoogleIdToken',
+  (code.match(/UrlFetchApp/g) || []).length ===
+  (fnBody('verifyGoogleIdToken').match(/UrlFetchApp/g) || []).length,
+  (code.match(/UrlFetchApp[^\n]*/) || ['none'])[0]);
+r.ok('it needs no OAuth2 library and no script token — the ID token is the credential',
   !/ScriptApp\.getOAuthToken|OAuth2/.test(code));
 
 // ══════════════════════════════════════════════════════════════════════════════

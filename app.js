@@ -19,7 +19,7 @@
 // the "update available" notice. That comparison is only meaningful because the
 // two numbers are pinned together — which is why the pin is load-bearing and not
 // just a tidy convention.
-const APP_VERSION = 'v158';
+const APP_VERSION = 'v159';
 
 // Fill every version slot on the page. One writer, so there is one place to look
 // when the number is wrong — the slots themselves are static markup, present on
@@ -122,6 +122,13 @@ const CONFIG = {
   // "Anyone within indrones.com" deployment — note the `/a/macros/indrones.com/`
   // segment, which is what distinguishes it from GAS_URL above.
   SSO_URL: 'https://script.google.com/a/macros/indrones.com/s/AKfycbybK8zQxCvU8-BZIMMAgzI_71sZZhYHE9vh0We5nDtTydOSny_zZ_yQfIi0z22D7uKj/exec',
+
+  // Google Identity Services — the modern "Sign in with Google". Paste the SAME
+  // OAuth Client ID here and in backend.gs. Public by design. When set, the sign-in
+  // screen uses Google's own account picker and an ID token instead of the
+  // domain-scoped deployment, which is the fix for a phone whose default Google
+  // account is a personal one. Empty falls back to SSO_URL above.
+  GOOGLE_CLIENT_ID: '',
 
   // Local development helper. Use http://localhost:PORT/?dev=1 to inspect the app
   // without Google auth while this prototype is still being built.
@@ -980,7 +987,7 @@ window.fetch = function (input, init) {
     // left on the machine — and on a shared laptop that is the previous person's
     // session, which is the exact hole this door must not have. It also keeps a
     // spent handoff code from being answered as "your session expired".
-    const isAuthCall = /[?&]action=(login|changePassword|forgotPassword|resetPassword|logout|sessionCheck|ping|googleExchange|deviceUnlock)\b/.test(url);
+    const isAuthCall = /[?&]action=(login|changePassword|forgotPassword|resetPassword|logout|sessionCheck|ping|googleExchange|googleIdExchange|deviceUnlock)\b/.test(url);
 
     const sessionToken = (currentUser && currentUser.sessionToken) || null;
     const email = (currentUser && currentUser.email) || '';
@@ -2485,6 +2492,78 @@ function showAuth() {
   maskAllPasswords();
 }
 
+// ─── GOOGLE IDENTITY SERVICES (the modern Google door) ───────────────────────
+// The domain-scoped deployment below reads the browser's DEFAULT Google account.
+// A phone whose default is a personal account gets Google's own "unable to open
+// the file" page before our code runs. GIS renders Google's real account picker
+// and hands back an ID token; the backend verifies it. This is the door that works
+// whatever account the browser is signed into.
+function googleIdConfigured() { return !!(CONFIG && CONFIG.GOOGLE_CLIENT_ID); }
+
+let _gisLoading = null;
+function loadGis() {
+  if (window.google && window.google.accounts && window.google.accounts.id) return Promise.resolve(true);
+  if (_gisLoading) return _gisLoading;
+  _gisLoading = new Promise(resolve => {
+    const s = document.createElement('script');
+    s.src = 'https://accounts.google.com/gsi/client';
+    s.async = true;
+    s.defer = true;
+    s.onload = () => resolve(true);
+    s.onerror = () => resolve(false);
+    document.head.appendChild(s);
+  });
+  return _gisLoading;
+}
+
+function renderGoogleIdButton() {
+  if (!googleIdConfigured()) return;
+  const slot = document.getElementById('auth-google-slot');
+  if (!slot || slot.dataset.rendered === '1') return;
+  loadGis().then(ok => {
+    if (!ok || !(window.google && window.google.accounts && window.google.accounts.id)) {
+      setAuthError('Google sign-in could not load. Check your connection and try again.');
+      return;
+    }
+    const width = Math.min(400, Math.max(220, Math.round(slot.getBoundingClientRect().width) || 320));
+    google.accounts.id.initialize({
+      client_id: CONFIG.GOOGLE_CLIENT_ID,
+      callback: handleGoogleCredential,
+      auto_select: false,
+      cancel_on_tap_outside: true,
+      ux_mode: 'popup',
+    });
+    slot.innerHTML = '';
+    google.accounts.id.renderButton(slot, {
+      type: 'standard',
+      theme: 'outline',
+      size: 'large',
+      text: 'continue_with',
+      shape: 'rectangular',
+      width: width,
+    });
+    slot.dataset.rendered = '1';
+  });
+}
+
+function handleGoogleCredential(response) {
+  const idToken = response && response.credential;
+  if (!idToken) { setAuthError('Google did not return a credential — try again.'); return; }
+  setAuthError('');
+  // The same wait screen a handoff return uses: the exchange is one backend round trip.
+  document.documentElement.setAttribute('data-sso', 'wait');
+  postAuth('googleIdExchange', { idToken: idToken, device: deviceLabel(), version: APP_VERSION })
+    .then(d => {
+      if (d && d.status === 'ok' && d.sessionToken) { finishAuth(d.email, d); return; }
+      showAuth();
+      setAuthError((d && d.message) || 'Google sign-in failed — use your email and password.');
+    })
+    .catch(() => {
+      showAuth();
+      setAuthError('Google sign-in failed — check your connection and try again.');
+    });
+}
+
 // The Google door's click. Module scope, not wireAuthForm's, because it is the one
 // thing on that screen that ignores everything typed into the form: it carries no
 // email, no password and no code, and its whole result is a session or a refusal.
@@ -3554,16 +3633,22 @@ function setAuthMode(mode) {
   // have been tidier and less honest: it would tell a person the feature does not
   // exist when the truth is that they are not signed in.
   const firstStep = typed;
-  set('auth-google-btn',    firstStep && !!CONFIG.SSO_URL);
+  // GIS is the modern door and takes the slot; the custom button is the fallback
+  // for a deployment that has only the old domain-scoped URL configured.
+  const gisOn = googleIdConfigured();
+  set('auth-google-btn',    firstStep && !gisOn && !!CONFIG.SSO_URL);
+  set('auth-google-slot',   firstStep && gisOn);
+  if (firstStep && gisOn) renderGoogleIdButton();
   // THE DIVIDER IS THE BLOCK'S, NOT GOOGLE'S. It used to be `!!CONFIG.SSO_URL` with
   // the Google button, which was right while the button was the only thing under it.
   // It now sits above three alternatives, and since 2026-10-08 two of them — the unlock
   // pair — are drawn on every entry screen whether or not this device can use them. So
   // "is there anything below me" and "is this the entry screen" are now the same
-  // question, and keying the line on SSO_URL would drop it between "Continue" and a
-  // pair that is still sitting right there. A lone "or" is the one thing this line must
-  // never be, and it now can never be one: the pair is unconditional.
-  set('auth-or',            firstStep && (!!CONFIG.SSO_URL || quickOn));
+  // question, and keying the line on one Google config would drop it between
+  // "Continue" and a pair that is still sitting right there. A lone "or" is the one
+  // thing this line must never be, and it now can never be one: the pair is
+  // unconditional.
+  set('auth-or',            firstStep && (gisOn || !!CONFIG.SSO_URL || quickOn));
   // The notice line carries one transient sentence at a time ("Taking you to
   // Google…") and is EMPTY on every other screen — which is to say hidden, because a
   // line that reserves its own height is a gap that reads as something failing to

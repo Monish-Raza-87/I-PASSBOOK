@@ -478,6 +478,10 @@
                  with Email" over four neutral alternatives. The divider above them says the
                  same thing in markup. -->
             <button type="button" class="btn btn-secondary" id="auth-google-btn" style="display:none" data-i18n="auth.sso">Continue with Indrones’ official email</button>
+            <!-- Google Identity Services renders its own account-picker button here
+                 when CONFIG.GOOGLE_CLIENT_ID is set. It replaces the custom button
+                 above, which remains the fallback for the old domain-scoped door. -->
+            <div id="auth-google-slot" class="auth-google-slot" style="display:none"></div>
 
             <!-- THE QUICK-UNLOCK PAIR, AND IT IS ALWAYS DRAWN.
                  It used to be shown only on a device that already held a registered

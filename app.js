@@ -19,7 +19,7 @@
 // the "update available" notice. That comparison is only meaningful because the
 // two numbers are pinned together — which is why the pin is load-bearing and not
 // just a tidy convention.
-const APP_VERSION = 'v159';
+const APP_VERSION = 'v160';
 
 // Fill every version slot on the page. One writer, so there is one place to look
 // when the number is wrong — the slots themselves are static markup, present on
@@ -7923,9 +7923,11 @@ function wireCustomerDoor() {
     if (prevFocus && prevFocus.focus) prevFocus.focus();
   };
 
-  open.addEventListener('click', show);
-  if (close) close.addEventListener('click', hide);
-  // A tap on the dimmed ground closes it; a tap INSIDE the card must not, which is
+  // The entry is an <a> to the customer portal's own form now. Its default
+  // navigation must stand; opening the legacy Google-Form modal as well would be
+  // two answers to one tap. The modal stays wired for an older cached index.html.
+  if (open.tagName !== 'A') open.addEventListener('click', show);
+  if (close) close.addEventListener('click', hide);  // A tap on the dimmed ground closes it; a tap INSIDE the card must not, which is
   // why this tests the target rather than listening on the card.
   door.addEventListener('click', e => { if (e.target === door) hide(); });
   document.addEventListener('keydown', e => {

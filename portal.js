@@ -1717,6 +1717,11 @@
     const tiles = $('portal-tiles');
     if (tiles) tiles.hidden = true;
     openPanel(panel.replace(/^panel-/, '').replace(/^reports$/, 'history'));
+    // A route that names the support form should land on the FORM, not on a panel
+    // that asks for another tap. This is also where the staff app's "CS Form" link
+    // arrives. `openReportForm()` shows the sign-in sheet itself when there is no
+    // portal session, so this is safe on a cold entry too.
+    if (route === 'support/new' && typeof openReportForm === 'function') openReportForm();
     if (route === 'profile/users') loadPortalUsers();
     const el = document.getElementById(panel);
     if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });

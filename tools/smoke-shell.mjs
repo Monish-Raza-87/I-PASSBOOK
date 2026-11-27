@@ -1498,11 +1498,11 @@ head('the landing page offers two doors, stacked, each of them collapsible');
   // adjacent."* So it is a <div> now: the Help & FAQ link, and the language picker pulled
   // up out of a sibling line of its own so the two sit beside each other.
   const footHtml = html.slice(footAt, html.indexOf('</div>', html.indexOf('id="lang-select"')) + 6);
-  ok('the language picker and the WhatsApp corner are one common foot, below both doors',
+  ok('the Help & FAQ and the language picker are one common foot, below both doors',
     footAt > doorsEnd &&
-    /<div class="landing-foot">[\s\S]*?id="lang-select"[\s\S]*?id="whatsapp-btn"/.test(html) &&
-    !/lang-select/.test(custCard) &&
-    !/lang-select/.test(empCard));
+    /<div class="landing-foot">[\s\S]*?id="auth-faq-link"[\s\S]*?id="lang-select"/.test(html) &&
+    !/auth-faq-link|lang-select/.test(custCard) &&
+    !/auth-faq-link|lang-select/.test(empCard));
   ok('...and it is a centred line, not a card of its own',
     /\.landing-foot \{[\s\S]*?justify-content:\s*center/.test(baseCss) &&
     /\.landing-foot \{[\s\S]*?display:\s*flex/.test(baseCss));
@@ -1512,13 +1512,14 @@ head('the landing page offers two doors, stacked, each of them collapsible');
   // not signed in yet; the owner's words were "this element is for customers after loging
   // in". `wireCustomerDoor()` and smoke-door-faq still resolve the id, so moving the button
   // was the whole change — nothing was deleted and no feature was orphaned.
-  // The Help & FAQ link was removed from this foot at the owner's request; the FAQ is a
-  // signed-in pane now, reached from the sidebar, not a sign-in-screen link.
-  ok('...and "Report a problem" and Help & FAQ are off the sign-in screen entirely',
+  // The owner, 2026-11-27: Help & FAQ belongs on the login page, not the portal.
+  // The foot carries the FAQ link (asserted above) and the portal's #nav-faq is
+  // hidden in base.css.
+  ok('...and "Report a problem" is off the sign-in screen entirely',
     !/customer-door-open/.test(footHtml) &&
-    !/auth-faq-link/.test(footHtml));
-  ok('...because it moved behind the sign-in, still hidden until a form is configured',
-    /<button type="button" class="nav-item" id="customer-door-open" style="display:none"/.test(html) &&
+    footHtml.indexOf('auth-faq-link') > -1);
+  ok('...because it moved behind the sign-in as the CS Form link to the portal form',
+    /<a class="nav-item" id="customer-door-open"[^>]*href="customer\.html\?route=support\/new"/.test(html) &&
     /getElementById\('customer-door-open'\)/.test(appCode));
 
   // ── THE CORNER: WHAT REPLACES "SIGN UP" ────────────────────────────────────────
@@ -1563,10 +1564,10 @@ head('the landing page offers two doors, stacked, each of them collapsible');
   // ON A PHONE THE PILL IS A DISC. 165px of fixed furniture landed across the
   // Help & FAQ line and the credit; the markup note always said the phone gets
   // the glyph alone, and this is the rule that finally does it.
-  ok('...and on a phone it is the mark alone, in the foot row beside the language picker',
+  ok('...and on a phone it is the mark alone, in the foot row beside Help & FAQ',
     /@media \(max-width: 639px\) \{[\s\S]*?\.wa-label \{ display: none; \}/.test(baseCss) &&
     /@media \(max-width: 639px\) \{[\s\S]*?\.wa-glyph \{ width: 46px; height: 46px; \}/.test(baseCss) &&
-    /<div class="landing-foot">[\s\S]*?id="lang-select"[\s\S]*?id="whatsapp-btn"/.test(html));
+    /<div class="landing-foot">[\s\S]*?id="auth-faq-link"[\s\S]*?id="lang-select"[\s\S]*?id="whatsapp-btn"/.test(html));
 }
 
 // ── The two halves of one ground ────────────────────────────────────────────────

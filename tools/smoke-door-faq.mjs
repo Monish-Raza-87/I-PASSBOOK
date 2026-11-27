@@ -444,12 +444,17 @@ ok('...and it no longer describes a frame that does not exist',
 // ── Where the page is reachable from ─────────────────────────────────────────
 head('the FAQ is reachable, and it ships');
 
-// The owner asked for the Help & FAQ link to come off the employee sign-in footer.
-// The page is still reachable from the signed-in sidebar (#nav-faq), which routes to
-// the app's own FAQ pane; faq.html itself remains the standalone fallback document.
-ok('the sign-in screen no longer carries a Help & FAQ link',
-  !/id="auth-faq-link"/.test(indexCode), 'sign-in link removed');
-ok('...and the signed-in sidebar still routes to Help & FAQ',
+// The owner, 2026-11-27: "it should be on the login page but not inside employee
+// login portal." So the landing foot carries the link to the standalone FAQ, and
+// the signed-in portal hides its own nav entry (#nav-faq). The route and pane stay
+// real for a direct link; only the portal entry is gone.
+ok('the sign-in screen links to the Help & FAQ page',
+  /id="auth-faq-link"[^>]*href="faq\.html"/.test(indexCode), 'sign-in link');
+ok('...and it is visible, not hidden like the Report button',
+  !/id="auth-faq-link"[^>]*style="display:none"/.test(indexCode), 'faq link visibility');
+ok('...and the signed-in portal hides its own Help & FAQ nav entry',
+  /#sidebar #nav-faq \{ display: none !important; \}/.test(baseCss), 'portal nav hidden');
+ok('...while the route and pane still exist for a direct link',
   /id="nav-faq"[^>]*href="#\/faq"/.test(indexCode) && /id="faq-view"/.test(indexCode),
   'in-app FAQ route');
 // Counted in base.css, not components.css: the landing page's own rules all live in
@@ -465,22 +470,31 @@ ok('...and in the deploy list, so it is actually published',
 ok('the other static pages stay OUT of the shell — review pages are not app screens',
   !/inspector\.html|plan\.html/.test(stripJs(swJs)), 'sw.js scan (comments stripped)');
 // The sidebar entry used to be a NEW TAB onto faq.html. Since 2026-10-08 it is a
-// route into a pane of this app — the owner's "our FAQ page is opening in a new tab,
-// that is not good for us. It has to be in our app, as per our UI and a part of our
-// app." So the assertions invert: it must NOT open the standalone page, and it must
-// NOT carry a target, because a second tab is exactly what was complained about.
-ok('the sidebar carries it too, so a signed-in person can reach it',
-  /id="nav-faq"[^>]*href="#\/faq"/.test(indexCode), 'sidebar link');
-ok('...and it is a ROUTE now, not a link out to the standalone page',
+// route into a pane of this app. It is hidden in the portal now, but the route must
+// still be a route, not a link out to the standalone page.
+ok('the sidebar entry is still a ROUTE, not a link out to the standalone page',
   !/id="nav-faq"[^>]*href="faq\.html"/.test(indexCode) &&
   !/<a class="nav-item" id="nav-faq"[^>]*target="_blank"/.test(indexCode),
   (indexCode.match(/<a class="nav-item" id="nav-faq"[\s\S]{0,300}?<\/a>/) || [''])[0].slice(0, 140));
 ok('...and its glyph comes from the ONE icon set, not a literal <svg> in the markup',
   /#nav-faq \.nav-icon/.test(appCode) && /\n  help:\s+'<circle/.test(appCode) &&
   !/id="nav-faq"[\s\S]{0,200}<svg/.test(indexCode), 'icon wiring');
-ok('...and its label is the sidebar key alone, now that the sign-in card link is gone',
-  /'nav\.help':/.test(i18nJs) && !/'door\.faq':/.test(i18nJs),
-  'sidebar key only');
+ok('...and both labels keep their own keys — the login link and the hidden portal entry',
+  /'nav\.help':/.test(i18nJs) && /'door\.faq':/.test(i18nJs),
+  'login + portal keys');
+
+// ── CS Form: the portal's own form, not the Google Form ──────────────────────
+head('the CS Form entry opens the app-built form, not the Google Form');
+ok('the signed-in entry is a link to the customer portal support form',
+  /<a class="nav-item" id="customer-door-open"[^>]*href="customer\.html\?route=support\/new"/.test(indexCode),
+  (indexCode.match(/<a class="nav-item" id="customer-door-open"[\s\S]{0,180}?<\/a>/) || [''])[0].slice(0, 180));
+ok('...and it points at no Google Form at all',
+  !/<a class="nav-item" id="customer-door-open"[^>]*docs\.google\.com/.test(indexCode));
+ok('...and the portal opens its own report form for that route',
+  /route === 'support\/new'[\s\S]{0,120}?openReportForm\(\)/.test(read('../portal.js')));
+ok('...and its label is CS Form, not the old Report a problem',
+  /'nav\.csForm':\s*'CS Form'/.test(i18nJs) &&
+  /<span class="nav-label" data-i18n="nav\.csForm">CS Form<\/span>/.test(indexCode));
 
 // ── The FAQ inside the app ────────────────────────────────────────────────────
 //

@@ -219,6 +219,8 @@ r.ok('the in-app report form is wired to every report button on the page',
   /\['raise', 'raise-2', 'raise-3', 'raise-p'\]\.forEach\(wireReport\)/.test(portal) &&
   /openReportForm\(\)/.test(portal) &&
   /apiPost\('createIR'/.test(portal));
+r.ok('...and support/new opens the form directly, so the staff CS Form lands on it',
+  /route === 'support\/new'[\s\S]{0,140}?openReportForm\(\)/.test(portal));
 r.ok('the report form fixes the prefix from the model and sends only the suffix',
   /REPORT_MODELS/.test(portal) &&
   /reportPrefixFor/.test(portal) &&

@@ -44,6 +44,8 @@ const componentsCss = read('../components.css');
 const baseCss = read('../base.css');
 const i18nJs = read('../i18n.js');
 const swJs = read('../sw.js');
+const customerHtml = read('../customer.html');
+const portalJs = read('../portal.js');
 const deploy = read('./deploy-ghpages.mjs');
 
 let fails = 0;
@@ -492,6 +494,28 @@ ok('...and it points at no Google Form at all',
   !/<a class="nav-item" id="customer-door-open"[^>]*docs\.google\.com/.test(indexCode));
 ok('...and the portal opens its own report form for that route',
   /route === 'support\/new'[\s\S]{0,120}?openReportForm\(\)/.test(read('../portal.js')));
+// The cold entry is the part that failed in the field (owner, 2026-11-27): the link
+// opened a tab, customer.html bounced to index.html WITHOUT the query, and a tab that
+// carried the staff session just showed the app again — the CS Form looked dead. A
+// routed entry now stays on the portal and asks for its sign-in, and the same route in
+// the URL is what boot() opens the form from once the code is accepted.
+ok('...and a signed-out routed entry is not bounced back to the app, losing the route',
+  /var hasRoute = false;[\s\S]{0,220}?hasRoute = \/\[\?&\]route=\/\.test\(search\)/.test(customerHtml) &&
+  /if \(!localStorage\.getItem\('ipbc_session'\) && !\/\[\?&\]state=\/\.test\(search\) && !hasRoute\) \{[\s\S]{0,80}?location\.replace\('index\.html'\)/.test(customerHtml));
+ok('...and the portal asks for the sign-in on that cold entry instead of redirecting',
+  /if \(!token\(\) && !probe && pending === 'home'\)[\s\S]{0,120}?location\.replace\(appLoginUrl\(\)\)/.test(portalJs) &&
+  /if \(!token\(\)\) \{[\s\S]{0,420}?showSignin\(pending === 'support\/new'/.test(portalJs));
+ok('...and the accepted sign-in then opens the route it was asked for',
+  /hideSignin\(\);[\s\S]{0,80}?await boot\(\);/.test(portalJs) &&
+  /showPortalPage\(portalRouteFromHash\(\)\)/.test(portalJs) &&
+  /if \(route === 'support\/new' && typeof openReportForm === 'function'\) openReportForm\(\)/.test(portalJs));
+ok('...and a staff account with no company still gets the form, asked which customer it is for',
+  /if \(portalRouteFromHash\(\) === 'support\/new'\)[\s\S]{0,300}?showPortalPage\('support\/new'\)/.test(portalJs) &&
+  /id="rep-company-wrap"/.test(portalJs) &&
+  /payload\.companyName = companyName/.test(portalJs));
+ok('...and the companies it offers are the ones that staff session can already see',
+  /async function loadStaffCompanies\(\)[\s\S]{0,220}?STAFF_COMPANIES = companiesFromGrid\(res\.grid\)/.test(portalJs) &&
+  /function companiesFromGrid\(grid\)[\s\S]{0,200}?'where do you work'/.test(portalJs));
 ok('...and its label is CS Form, not the old Report a problem',
   /'nav\.csForm':\s*'CS Form'/.test(i18nJs) &&
   /<span class="nav-label" data-i18n="nav\.csForm">CS Form<\/span>/.test(indexCode));

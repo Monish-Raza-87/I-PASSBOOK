@@ -758,6 +758,13 @@
           <button type="button" class="draft-clear" id="rep-draft-clear">Clear draft</button>
         </p>
         <form id="report-form" class="report-grid" novalidate>
+          <div class="field" id="rep-company-wrap" hidden>
+            <label for="rep-company">Which customer is this report for?</label>
+            <input id="rep-company" list="rep-company-list" autocomplete="off"
+                   placeholder="Start typing the company name">
+            <datalist id="rep-company-list"></datalist>
+            <p class="report-hint">The company the IR is raised under. Staff reports carry this; a customer's company comes from their sign-in.</p>
+          </div>
           <div class="field" id="rep-fleet-wrap" hidden>
             <label for="rep-fleet">Your aircraft</label>
             <select id="rep-fleet">
@@ -848,6 +855,21 @@
     if (SAMPLE) document.getElementById('rep-sample-note').hidden = false;
     const employee = /@indrones\.com$/i.test((ME && ME.email) || '');
     if (employee) document.getElementById('rep-team-wrap').hidden = false;
+    // A staff account has no company of its own, so the form asks which customer the
+    // report belongs to. The names come from the IR grid this session can already
+    // read; the field stays a free text input (with the list as help), because a
+    // brand-new customer has no ticket yet and must not be unfilable.
+    const staff = !(ME && ME.customerOf);
+    if (staff) {
+      const wrap = document.getElementById('rep-company-wrap');
+      const list = document.getElementById('rep-company-list');
+      wrap.hidden = false;
+      STAFF_COMPANIES.forEach(name => {
+        const o = document.createElement('option');
+        o.value = name;
+        list.appendChild(o);
+      });
+    }
     const close = () => modal.remove();
     modal.addEventListener('click', e => { if (e.target === modal) close(); });
     document.getElementById('report-x').addEventListener('click', close);
@@ -1018,10 +1040,11 @@
         phone: draftValue('rep-phone'),
         spoc: draftValue('rep-spoc'),
         courier: draftValue('rep-courier'),
-        accessory: draftValue('rep-accessory')
+        accessory: draftValue('rep-accessory'),
+        company: draftValue('rep-company')
       };
       const meaningful = ['model', 'suffix', 'full', 'fleet', 'team', 'desc', 'loc',
-        'phone', 'spoc', 'courier', 'accessory'].some(k => String(data[k] || '').trim());
+        'phone', 'spoc', 'courier', 'accessory', 'company'].some(k => String(data[k] || '').trim());
       try {
         if (meaningful) localStorage.setItem(DRAFT_KEY, JSON.stringify(data));
         else localStorage.removeItem(DRAFT_KEY);
@@ -1064,6 +1087,7 @@
       setDraftValue('rep-spoc', d.spoc);
       setDraftValue('rep-courier', d.courier);
       setDraftValue('rep-accessory', d.accessory);
+      setDraftValue('rep-company', d.company);
       updateSerialMode();
       if (draftNote) draftNote.hidden = false;
     };
@@ -1096,6 +1120,8 @@
       const isAccessory = !useFleet && reportIsAccessory(model);
       const accessoryName = String(document.getElementById('rep-accessory').value || '').trim();
       const desc = String(document.getElementById('rep-desc').value || '').trim();
+      const companyName = staff
+        ? String(document.getElementById('rep-company').value || '').trim() : '';
       if (fleet.length && !useFleet && fleetEl.value !== '__manual') {
         msgEl.textContent = 'Select your aircraft.';
         return;
@@ -1107,6 +1133,7 @@
         return;
       }
       if (employee && !team) { msgEl.textContent = 'Choose the team you belong to.'; return; }
+      if (staff && !companyName) { msgEl.textContent = 'Name the customer company this report is for.'; return; }
       if (!useFleet && !noSerial &&
           (freeSerial ? !fullSerial : (!/^[0-9]{1,3}$/.test(suffix) || Number(suffix) < 1))) {
         msgEl.textContent = reportIsRs2(model)
@@ -1162,6 +1189,10 @@
           payload.droneSerial = reportIsRs2(model) ? rs2Serial : fullSerial;
         } else payload.serialSuffix = suffix;
         if (isAccessory) payload.accessoryName = accessoryName;
+        if (staff) {
+          payload.companyName = companyName;
+          payload.customerName = String(document.getElementById('rep-spoc').value || '').trim();
+        }
         if (SAMPLE) payload.sample = '1';
         const res = await apiPost('createIR', payload);
         if (!res || res.status !== 'ok') {
@@ -1178,7 +1209,7 @@
           : 'The acknowledgement email with the IR number has been sent to you.';
         form.innerHTML = `<div class="report-ok"><b>${okTitle}</b><br>${okBody}</div>
           <button type="button" class="btn" id="rep-done">Close</button>`;
-        document.getElementById('rep-done').addEventListener('click', () => { close(); if (typeof loadTickets === 'function') loadTickets(); });
+        document.getElementById('rep-done').addEventListener('click', () => { close(); if (typeof loadTickets === 'function' && !staff) loadTickets(); });
       } catch (err) {
         msgEl.className = 'msg err';
         msgEl.textContent = (err && err.message) || 'Could not submit the report.';
@@ -1529,6 +1560,32 @@
     return out.reverse();   // latest first, the order the app's own list uses
   }
 
+  // The distinct company names in the IR grid. The header match is the backend's
+  // companyColumnIndex() in this file's own words: the Form's question has been
+  // reworded before, and a reader that only knows one spelling returns nothing.
+  function companiesFromGrid(grid) {
+    if (!grid || !grid.length) return [];
+    const h = (grid[0] || []).map(x => String(x).trim().toLowerCase());
+    const needles = ['where do you work', 'company name', 'company', 'organisation', 'organization'];
+    let col = -1;
+    for (const n of needles) {
+      col = h.findIndex(x => x.indexOf(n) > -1);
+      if (col > -1) break;
+    }
+    if (col < 0) return [];
+    const seen = {};
+    const out = [];
+    for (let r = 1; r < grid.length; r++) {
+      const row = grid[r] || [];
+      const v = String(row[col] == null ? '' : row[col]).trim();
+      if (!v || seen[v.toLowerCase()]) continue;
+      seen[v.toLowerCase()] = true;
+      out.push(v);
+    }
+    out.sort((a, b) => a.toLowerCase() < b.toLowerCase() ? -1 : 1);
+    return out;
+  }
+
   const OVERVIEW_KEY = 'sec-a';      // the app's id for one ticket's Overview record
   const DESK_FIELDS = [
     { id: 'a_crmOwner',     label: 'Your point of contact' },
@@ -1539,6 +1596,11 @@
   // ── State ────────────────────────────────────────────────────────────────────
   let ME = null;        // { email, customerOf, name } — from the backend, never from storage
   let TICKETS = [];     // this customer's rows, as the sheet displays them
+  // Staff have no company scope, so the CS Form has to ask WHICH customer a report is
+  // for. These are the companies already present in the IR grid — the same rows the
+  // staff session can read — so the form offers names instead of asking for one from
+  // memory. Empty for a customer; their company is the session's.
+  let STAFF_COMPANIES = [];
   let STAGE = {};       // irNumber → { status, assignee, updatedAt } from the app's store
   let STAGE_OK = false; // false when that read failed — see paintList()
 
@@ -1585,7 +1647,22 @@
       showSignin(msgOf(me));
       return;
     }
-    if (!me.customerOf) { showStaff(me); return; }
+    if (!me.customerOf) {
+      // A staff account has no company scope. On the CS Form route that is not a wrong
+      // door: the app's own sidebar entry points here precisely so staff can raise a
+      // report, and the form asks which customer it is for (createIR has taken a
+      // company from a staff session since v144). Any other portal route keeps the
+      // old answer — this is still the customer's space.
+      if (portalRouteFromHash() === 'support/new') {
+        ME = me;
+        setSignedIn(me);
+        await loadStaffCompanies();
+        showPortalPage('support/new');
+        return;
+      }
+      showStaff(me);
+      return;
+    }
 
     ME = me;
     setSignedIn(me);
@@ -1784,6 +1861,15 @@
       tiles[i].setAttribute('aria-pressed', tiles[i].dataset.panel === name ? 'true' : 'false');
     }
   }
+  // The company list for a staff CS Form. One read, and only its names are kept — the
+  // grid itself is never painted on this page, because a staff session sees every
+  // company's rows and the portal is not the place to show them.
+  async function loadStaffCompanies() {
+    const res = await apiGet('listIRs');
+    if (!res || res.status !== 'ok') return;
+    STAFF_COMPANIES = companiesFromGrid(res.grid);
+  }
+
   async function loadTickets() {
     // No openPanel() here: boot() decides the route a moment later, and showing
     // the history panel before that decision made the signed-in home flash the
@@ -3347,12 +3433,26 @@
   window.CustomerPortal = {
     mount: function (root) {
       if (!root) return;
-      if (!token() && !/[?&]state=/.test(location.search)) {
+      const probe = /[?&]state=/.test(location.search);
+      // A hash route (in-app navigation) wins; otherwise the query's `route` is the
+      // cold-entry hint. With neither, this is the portal's home.
+      const pending = probe ? '' : portalRouteFromHash();
+      if (!token() && !probe && pending === 'home') {
         location.replace(appLoginUrl());
         return;
       }
       root.innerHTML = PORTAL_HTML;
       wirePortal();   // now that the markup is really in the document
+      if (!token()) {
+        // A routed entry — customer.html?route=support/new, which is where the staff
+        // app's CS Form lands — is one screen being asked for. Ask for the sign-in
+        // HERE, and boot() will open that screen once the code is accepted. A plain
+        // visit still leaves for the app root, the one login page.
+        showSignin(pending === 'support/new'
+          ? 'Sign in to raise an IR, then try again.'
+          : 'Sign in to open this page.');
+        return;
+      }
       boot();
     }
   };

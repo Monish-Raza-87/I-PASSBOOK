@@ -58,10 +58,26 @@
 </script>
 <script>
   // The customer portal has its own address, but NOT its own login. With no
-  // customer session this page goes to the app's single login page; after the
+  // customer session a plain visit goes to the app's single login page; after the
   // code is accepted the app returns the customer here.
+  //
+  // A ROUTED ENTRY IS THE ONE EXCEPTION — the staff app's CS Form arrives as
+  // customer.html?route=support/new. That link is already asking for one screen,
+  // so the page stays and lets portal.js ask for the sign-in itself, then open the
+  // form for the route. Redirecting here first was the bug that made the CS Form
+  // look like a dead button: the query was dropped on the way to index.html, and a
+  // tab that also carried the staff session simply showed the app again.
+  //
+  // `state` is the browser harness's probe, not a production link: it must mount
+  // the portal without a session so the probes can drive it.
   try {
-    // state is the browser harness's probe, not a production link.\n    if (!localStorage.getItem('ipbc_session') && !/[?&]state=/.test(location.search)) location.replace('index.html');
+    var search = String(location.search || '');
+    var hasRoute = false;
+    try { hasRoute = !!new URLSearchParams(search).get('route'); }
+    catch (e2) { hasRoute = /[?&]route=/.test(search); }
+    if (!localStorage.getItem('ipbc_session') && !/[?&]state=/.test(search) && !hasRoute) {
+      location.replace('index.html');
+    }
   } catch (e) {
     location.replace('index.html');
   }

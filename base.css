@@ -1664,6 +1664,10 @@ html[data-sso="wait"] #sso-wait { display: flex; }
   :root:not([data-theme="dark"]) .auth-brand-panel[data-ground^="fuse"] ~ .auth-main .landing-lang select {
     border-color: var(--ind-on-yellow);
   }
+  /* The FAQ link and the picker are one control pair on the lit ground — same ink. */
+  :root:not([data-theme="dark"]) .auth-brand-panel[data-ground^="fuse"] ~ .auth-main .landing-foot #auth-faq-link {
+    color: var(--ind-on-yellow);
+  }
 }
 
 /* ── AND THE TWO DOOR BARS ARE THAT SAME OFF-WHITE — THEY ARE THE OTHER BUTTONS ──
@@ -2484,6 +2488,16 @@ html[data-sso="wait"] #sso-wait { display: flex; }
    each other. */
 .landing-foot .link-btn { width: auto; }
 
+/* The owner, 2026-11-27: the Help & FAQ link must read as the same control as the
+   language picker beside it. The size was already the same 13px; its --ink-gray-8 and
+   medium weight were the visible differences. On the lit fuse ground the picker's ink
+   is --ind-on-yellow, so the link takes that too (below, with the other fuse rules). */
+.landing-foot #auth-faq-link {
+  color: var(--ink-gray-7);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-regular);
+}
+
 /* ── Show/hide a password ────────────────────────────────────
    The toggle is a SIBLING of the input inside .pw-wrap, never a child of a
    <label> — a button inside a label inherits the label's click and would both
@@ -3165,7 +3179,19 @@ html[data-sso="wait"] #sso-wait { display: flex; }
     letter-spacing: 0.01em;
     flex: 0 0 auto;
     max-width: 100%;
+    /* Two lines, not an ellipsis. The owner, 2026-11-27: "Log Analyser", "CS Form"
+       and "User Access" should wrap so the bottom bar reads cleanly. The bar's own
+       height is unchanged; two 11px lines still fit the 60px strip, and the shorter
+       labels simply centre beside them. */
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+    line-height: 1.05;
   }
+  /* "CS FORM" is the one multi-word label short enough to fit on one line; the
+     owner asked for it to sit on two like LOG/ANALYSER and USER/ACCESS. A max-width
+     just under its full width is enough, and it leaves "FORM" intact. */
+  #sidebar #customer-door-open .nav-label { max-width: 3.5em; }
   .nav-item.active { background: transparent; color: var(--ink-gray-9); }
   .nav-item.active .nav-icon { transform: translateY(-1px); }
 

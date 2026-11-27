@@ -2741,6 +2741,15 @@ html[data-sso="wait"] #sso-wait { display: flex; }
 }
 .nav-item.active .nav-count { background: var(--surface-gray-5); color: var(--ink-gray-9); }
 
+/* HELP & FAQ BELONGS TO THE SIGN-IN PAGE, NOT THE PORTAL. The owner, 2026-11-27:
+   "it should be on the login page but not inside employee login portal." The nav
+   item stays in the document because the route and the pane are still real (a deep
+   link to #/faq works), but it must not appear in the sidebar or in the phone's
+   bottom tab, where it was the only visible entry. The landing foot carries the link
+   to the standalone faq.html instead. */
+#sidebar #nav-faq { display: none !important; }
+
+
 .sidebar-user {
   display: flex;
   align-items: center;

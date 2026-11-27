@@ -93,6 +93,7 @@
     // to shorten the link on the sign-in card with it, and a shared key would make
     // that impossible — which is the whole reason this table exists.
     'nav.help':            'Help & FAQ',
+    'nav.csForm':          'CS Form',
     'nav.setup':           'Setup',
 
     // ── The IR list, and the board and grid it draws the same rows as ────────
@@ -492,6 +493,7 @@
     // sender's address. Saying so BEFORE they press anything is the difference
     // between a form and a trap, so do not shorten it away.
     'door.report':      'Report a problem',
+    'door.faq':         'Help & FAQ',
     'door.close':       'Close',
     'door.lede':        'Tell the service desk what went wrong. You do not need an account here, and nothing on this screen asks who you are.',
     'door.signInHint':  'The form is made with Google Forms. If this device is not already signed in to a Google account, Google will ask you to sign in before it shows you the form — that is Google asking, not this app.',
@@ -576,6 +578,7 @@
     'nav.logAnalyser':     'लॉग विश्लेषक',
     'nav.userAccess':      'उपयोगकर्ता पहुँच',
     'nav.help':            'सहायता और FAQ',
+    'nav.csForm':          'सीएस फॉर्म',
     'nav.setup':           'सेटअप',
 
     // ── The IR list, and the board and grid it draws the same rows as ────────
@@ -781,6 +784,7 @@
 
     // ── The customer door, and the FAQ behind it ─────────────────────────────
     'door.report':      'समस्या बताएँ',
+    'door.faq':         'सहायता और FAQ',
     'door.close':       'बंद करें',
     'door.lede':        'सेवा डेस्क को बताएँ कि क्या गड़बड़ हुई। यहाँ खाते की ज़रूरत नहीं, और इस स्क्रीन पर कहीं भी आपसे नाम नहीं पूछा जाता।',
     'door.signInHint':  'यह फ़ॉर्म Google Forms से बना है। अगर इस डिवाइस पर पहले से Google खाता साइन-इन नहीं है, तो Google फ़ॉर्म दिखाने से पहले साइन-इन माँगेगा — वह Google माँग रहा है, यह ऐप नहीं।',

@@ -690,10 +690,11 @@
            needs.
 
            The door itself is not gone: #customer-door, wireCustomerDoor() and
-           CUSTOMER_FORM_URL all still stand, and the entry point moved INTO the app, to
-           the signed-in nav beside Help & FAQ — see #nav-report in the sidebar. A modal
-           with no trigger is dead code that reads as a feature. -->
+           CUSTOMER_FORM_URL all still stand, and the entry point moved INTO the app —
+           see #nav-report in the sidebar. A modal with no trigger is dead code that
+           reads as a feature. -->
       <div class="landing-foot">
+        <a class="link-btn" id="auth-faq-link" href="faq.html" data-i18n="door.faq">Help &amp; FAQ</a>
         <div class="landing-lang">
           <select id="lang-select" aria-label="Language" data-i18n-aria="landing.language"></select>
         </div>
@@ -712,7 +713,7 @@
 
              IT LIVES IN THE FOOT ROW so the desktop's fixed pill and the phone's 46px
              disc are the same element: fixed takes it out of this row on a desktop,
-             static leaves it beside the language picker on a phone. -->
+             static leaves it beside Help & FAQ and the language picker on a phone. -->
         <a class="wa-corner" id="whatsapp-btn" href="#" target="_blank" rel="noopener noreferrer"
            style="display:none" data-i18n-aria="door.whatsapp" data-i18n-title="door.whatsapp">
           <span class="wa-label" data-i18n="door.whatsappCta">Get in touch</span>
@@ -886,28 +887,22 @@
           <span class="nav-label" data-i18n="nav.setup">Setup</span>
         </a>
 
-        <!-- ── REPORT A PROBLEM, FOR SOMEONE ALREADY SIGNED IN ──
-             It stood on the SIGN-IN screen until 2026-10-10, and the owner moved it:
-             *"We need to remove report a problem button from login page, this element is
-             for customers after loging in."* It is the Google-Forms door, and a person
-             who has just failed to get in has no use for a form about a job; the WhatsApp
-             corner is what that person needs. A signed-in customer does have a use for
-             it, and does not have to look for it.
-
-             ⚠ IT KEEPS THE ID `customer-door-open`, deliberately. `wireCustomerDoor()`
-             in app.js binds it, and tools/smoke-door-faq.mjs holds the wiring to the
-             markup by that id. Renaming it to match its new home would be a rename of
-             the wiring's anchor, not a description of where the button is — and the id
-             still says the true thing: it opens the customer door.
-
-             It stays `display:none` until CUSTOMER_FORM_URL is a real URL, for the same
-             reason it did before: an entry that opens an empty tab is worse than no
-             entry. app.js reveals it. -->
-        <button type="button" class="nav-item" id="customer-door-open" style="display:none"
-                title="Report a problem" data-i18n-title="door.report">
+        <!-- ── CS FORM, FOR SOMEONE ALREADY SIGNED IN ──
+             Stands where "Report a problem" stood. Renamed and repointed on the
+             owner's instruction, 2026-11-27: it no longer opens the Google Form, it
+             opens the app's OWN Customer Support form, which lives in the customer
+             portal (portal.js). A new tab keeps the staff app where it was. The
+             portal asks for a sign-in if this device has no portal session; that is
+             the same email + code door, and the form's "Which team do you belong
+             to?" field is there for staff.
+             ⚠ IT KEEPS THE ID `customer-door-open`: app.js and smoke-door-faq.md
+             hold the wiring to this id, and the id still describes where it goes. -->
+        <a class="nav-item" id="customer-door-open" href="customer.html?route=support/new"
+           target="_blank" rel="noopener noreferrer"
+           title="Open the Customer Support form" data-i18n-title="nav.csForm">
           <span class="nav-icon" aria-hidden="true"></span>
-          <span class="nav-label" data-i18n="door.report">Report a problem</span>
-        </button>
+          <span class="nav-label" data-i18n="nav.csForm">CS Form</span>
+        </a>
 
         <div class="sidebar-section-label" id="nav-admin-label" style="display:none" data-i18n="nav.administration">Administration</div>
         <button type="button" class="nav-item" id="nav-access" style="display:none">

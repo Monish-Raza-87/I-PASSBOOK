@@ -1568,6 +1568,17 @@ head('the landing page offers two doors, stacked, each of them collapsible');
     /@media \(max-width: 639px\) \{[\s\S]*?\.wa-label \{ display: none; \}/.test(baseCss) &&
     /@media \(max-width: 639px\) \{[\s\S]*?\.wa-glyph \{ width: 46px; height: 46px; \}/.test(baseCss) &&
     /<div class="landing-foot">[\s\S]*?id="auth-faq-link"[\s\S]*?id="lang-select"[\s\S]*?id="whatsapp-btn"/.test(html));
+  // The owner, 2026-11-27: the FAQ link and the language picker should read as one
+  // pair. Size was already equal; the ink and weight are matched here.
+  ok('...and the FAQ link matches the language picker in size, weight and ink',
+    /\.landing-foot #auth-faq-link \{[^}]*color:\s*var\(--ink-gray-7\)[^}]*font-size:\s*var\(--text-sm\)[^}]*font-weight:\s*var\(--weight-regular\)/.test(baseCss) &&
+    /data-ground\^="fuse"[\s\S]{0,260}?\.landing-foot #auth-faq-link \{[^}]*color:\s*var\(--ind-on-yellow\)/.test(baseCss));
+  // ...and the phone's bottom tab wraps "Log analyser", "CS Form" and "User access"
+  // instead of ellipsising them, without changing the bar's height.
+  ok('...and the phone tab labels wrap to two lines rather than clipping',
+    /\.nav-label \{[^}]*white-space:\s*normal[^}]*overflow:\s*visible[^}]*text-overflow:\s*clip/.test(baseCss) &&
+    /#sidebar #customer-door-open \.nav-label \{ max-width:\s*3\.5em; \}/.test(baseCss) &&
+    /--bottombar-h:\s*60px/.test(read('../tokens.css')));
 }
 
 // ── The two halves of one ground ────────────────────────────────────────────────
